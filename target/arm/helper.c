@@ -15,6 +15,7 @@
 #include <zlib.h> /* For crc32 */
 #include "exec/semihost.h"
 #include "sysemu/kvm.h"
+#include "hw/avatar/interrupts.h"
 
 #define ARM_CPU_FREQ 1000000000 /* FIXME: 1 GHz, should be configurable */
 
@@ -5981,6 +5982,8 @@ static void do_v7m_exception_exit(CPUARMState *env)
     if (env->v7m.exception != 0) {
         armv7m_nvic_complete_irq(env->nvic, env->v7m.exception);
     }
+
+    avatar_armv7m_exception_exit(env->v7m.exception, type);
 
     /* Switch to the target stack.  */
     switch_v7m_sp(env, (type & 4) != 0);
