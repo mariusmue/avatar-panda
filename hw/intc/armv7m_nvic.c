@@ -20,6 +20,7 @@
 #include "exec/address-spaces.h"
 #include "gic_internal.h"
 #include "qemu/log.h"
+#include "hw/avatar/interrupts.h"
 
 typedef struct {
     GICState gic;
@@ -457,6 +458,8 @@ static void nvic_sysreg_write(void *opaque, hwaddr addr,
     nvic_state *s = (nvic_state *)opaque;
     uint32_t offset = addr;
     int i;
+
+    avatar_armv7m_nvic_forward_write(offset, value);
 
     switch (offset) {
     case 0xd18 ... 0xd23: /* System Handler Priority.  */
