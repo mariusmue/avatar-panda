@@ -459,7 +459,7 @@ static void nvic_sysreg_write(void *opaque, hwaddr addr,
     uint32_t offset = addr;
     int i;
 
-    avatar_armv7m_nvic_forward_write(offset, value);
+    avatar_armv7m_nvic_forward_write(offset, value, size);
 
     switch (offset) {
     case 0xd18 ... 0xd23: /* System Handler Priority.  */
