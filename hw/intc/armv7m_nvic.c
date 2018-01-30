@@ -144,6 +144,14 @@ int armv7m_nvic_acknowledge_irq(void *opaque)
         hw_error("Interrupt but no vector\n");
     if (irq >= 32)
         irq -= 16;
+
+    // FIXME: ebtaleb: the context in which the function ran in the original
+    // source tree isnt the same as here, where the codebase is older
+    // bugs might be creeping in here....
+    // refer to da6d674e509 - armv7m: Rewrite NVIC to not use any GIC code
+    avatar_armv7m_exception_enter(irq);
+    /*const int pending = s->gic.irq_state[irq].pending;*/
+    /*avatar_armv7m_exception_enter(pending);*/
     return irq;
 }
 
