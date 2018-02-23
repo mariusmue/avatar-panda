@@ -19,3 +19,4 @@ replaymovie
 memsavep
 unigrams
 textprinter
+get_llvm_trace
