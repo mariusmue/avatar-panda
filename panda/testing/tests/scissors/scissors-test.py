@@ -20,8 +20,10 @@ num_tests = 100
 num_pass = 0
 num_fail = 0
 
+binaries = ["netstat", "find"]
+
 # get number of instructions in file 
-for binary in ["netstat", "find"]:
+for binary in binaries:
     # ew -- ray this is grossssss
     with open(replaydir+"/%s-rr-nondet.log" % binary, 'rb') as f:
         num_instrs = struct.unpack("<Q", f.read()[:8])
@@ -50,7 +52,7 @@ for binary in ["netstat", "find"]:
 os.chdir(tmpoutdir)
 with open(tmpoutfile, "w") as f:
     f.write("scissors-test results: %d pass %d fail\n" % (num_pass, num_fail))
-    if num_pass == num_tests:
+    if num_pass == num_tests * (len(binaries)):
         f.write("Scissors PASS\n")
     else:
         f.write("Scissors FAIL\n")
