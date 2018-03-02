@@ -216,11 +216,6 @@ llvm-helpers.bc: llvm-helpers.bc1 panda/tools/helper_call_modifier
 		panda/tools/helper_call_modifier -i $< -o $@,\
 		"LLMORPH $(TARGET_DIR)$@")
 
-<<<<<<< HEAD
-=======
-# add this to the all target
-#all: $(llvmmorph-y) panda/tools/dynslice2 panda/tools/slice_analyzer
->>>>>>> 5f58a1e... WIP: Pandalog C++ API  (#208)
 all: $(llvmmorph-y)
 
 clean: clean-llvm
