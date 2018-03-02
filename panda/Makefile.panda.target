@@ -128,8 +128,8 @@ PROGS+=$(RR_PRINT_PROG) plog_pb2.py
 
 # Uncomment next two lines to enable compiled plog_reader.
 # if PLOG_READER is defined, plog writing functions in plog-cc.cpp will be disabled.
- #PROGS+=$(PLOG_READER_PROG) 
- #QEMU_CFLAGS += -DPLOG_READER
+#PROGS+=$(PLOG_READER_PROG) 
+#QEMU_CFLAGS += -DPLOG_READER
 
 clean: clean-panda
 
@@ -216,6 +216,11 @@ llvm-helpers.bc: llvm-helpers.bc1 panda/tools/helper_call_modifier
 		panda/tools/helper_call_modifier -i $< -o $@,\
 		"LLMORPH $(TARGET_DIR)$@")
 
+<<<<<<< HEAD
+=======
+# add this to the all target
+#all: $(llvmmorph-y) panda/tools/dynslice2 panda/tools/slice_analyzer
+>>>>>>> 5f58a1e... WIP: Pandalog C++ API  (#208)
 all: $(llvmmorph-y)
 
 clean: clean-llvm
