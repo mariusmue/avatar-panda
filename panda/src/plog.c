@@ -90,17 +90,7 @@ void pandalog_write_entry(Panda__LogEntry *entry) {
 }
 
 void pandalog_open_read(const char *path, uint32_t pl_mode) {
-    // NB: 0 chunk size for now -- read_dir will figure this out
-    //pandalog_create(0);
-    //thePandalog->mode = (PlMode) pl_mode;
-    //assert (in_read_mode());
-    //thePandalog->filename = strdup(path);
-    //thePandalog->file = fopen(path, "r");
-    //// read directory (and header)
-    //read_dir();
-    //thePandalog->chunk_num = 0;
 	if (pl_mode == PL_MODE_READ_FWD) {
-
 		pandalog_cc_init_read(path);
 	} else if (pl_mode == PL_MODE_READ_BWD) {
 		pandalog_cc_init_read_bwd(path);
@@ -139,107 +129,6 @@ Panda__LogEntry *pandalog_read_entry(void) {
 
 	Panda__LogEntry *ple = panda__log_entry__unpack(NULL, n, buf);
 	return ple;
-
-    //assert (in_read_mode());
-    //PandalogChunk *plc = &(thePandalog->chunk);
-    //uint32_t new_chunk_num;
-    //Panda__LogEntry *returnEntry;
-
-    //if (thePandalog->mode == PL_MODE_READ_FWD) {
-        //if (plc->ind_entry > plc->num_entries-1) {
-            //if (thePandalog->chunk_num == thePandalog->dir.max_chunks-1) return NULL;
-
-            //new_chunk_num = thePandalog->chunk_num+1;
-            //thePandalog->chunk_num = new_chunk_num;
-
-            //unmarshall_chunk(new_chunk_num);
-            //plc = &(thePandalog->chunk);
-            ////reset ind_entry and return first element of new chunk
-            //plc->ind_entry = 0;
-            //returnEntry = plc->entry[plc->ind_entry];
-            //plc->ind_entry++;
-        //} else {
-            ////more to read in this chunk
-            //returnEntry = plc->entry[plc->ind_entry];
-            //plc->ind_entry++;
-        //}
-        //return returnEntry;
-    //}
-
-    //if (thePandalog->mode == PL_MODE_READ_BWD) {
-        //if(plc->ind_entry == -1) {
-            //if(thePandalog->chunk_num == 0) return NULL;
-
-            //new_chunk_num = thePandalog->chunk_num-1;
-            //thePandalog->chunk_num = new_chunk_num;
-
-            //unmarshall_chunk(new_chunk_num);
-            //plc->ind_entry = thePandalog->dir.num_entries[new_chunk_num]-1;
-            //returnEntry = plc->entry[plc->ind_entry];
-            //plc->ind_entry--;
-        //} else {
-            //returnEntry = plc->entry[plc->ind_entry];
-            //plc->ind_entry--;
-        //}
-        
-        return returnEntry;
-    }
-    if (new_chunk) {
-        thePandalog->chunk_num = new_chunk_num;
-        unmarshall_chunk(new_chunk_num);
-        // can't use plc anymore
-        plc = &(thePandalog->chunk);
-        if (thePandalog->mode == PL_MODE_READ_FWD)
-            //reset ind_entry
-            plc->ind_entry = 0;
-        else
-            plc->ind_entry = thePandalog->dir.num_entries[new_chunk_num]-1;
-    }
-
-	return returnEntry;
-}
-
-// binary search to find chunk for this instr
-uint32_t find_chunk(uint64_t instr, uint32_t c1, uint32_t c2) {
-    assert (c1 <= c2);
-    if (c1 == c2) return c1;
-    uint32_t mid = (c1 + c2) / 2;
-    // if we ask for instr that is before every instr in log or after every one,
-    // return first / last chunk
-    if (instr < thePandalog->dir.instr[c1]) return c1;
-    if (instr > thePandalog->dir.instr[c2]) return c2;
-    if (thePandalog->dir.instr[c1] <= instr && instr <= thePandalog->dir.instr[mid]) {
-        return find_chunk(instr, c1, mid);
-    }
-    assert (thePandalog->dir.instr[mid] <= instr && instr <= thePandalog->dir.instr[c2]);
-    return find_chunk(instr, mid, c2);
-}
-
-
-void pandalog_free_entry(Panda__LogEntry *entry) {
-    // ok no, you aren't allowed to do this from outside anymore
-    // the chunk owns that data and frees it when it wants
-}
-
-// another binary search to find first index into current chunk for this instr
-uint32_t find_ind(uint64_t instr, uint32_t i1, uint32_t i2) {
-    assert (i1 <= i2);
-    if (i1 == i2) return i1;
-    uint32_t mid = (i1 + i2) / 2;
-    PandalogChunk *chunk = &(thePandalog->chunk);
-    if (instr < chunk->entry[i1]->instr) {
-        // just means first instr in log is after what we want
-        return i1;
-    }
-    if (instr > chunk->entry[i2]->instr) {
-        // just means we asked for instr that is after last instr in log
-        return i2;
-    }
-    if (chunk->entry[i1]->instr <= instr && instr <= chunk->entry[mid]->instr) {
-        return find_chunk(instr, i1, mid);
-    }
-    assert (chunk->entry[mid]->instr <= instr && instr <= chunk->entry[i2]->instr);
-    return find_chunk(instr, mid, i2);
 }
 
 
