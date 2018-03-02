@@ -57,7 +57,6 @@ static INLINEIT size_t rr_fwrite(void *ptr, size_t size, size_t nmemb, FILE *f) 
 
 static INLINEIT size_t rr_fread(void *ptr, size_t size, size_t nmemb, FILE *f) {
     size_t result = fread(ptr, size, nmemb, f);
-    rr_nondet_log->bytes_read += nmemb * size;
     sassert(result == nmemb, 2);
     return result;
 }
@@ -126,7 +125,8 @@ static RR_prog_point copy_entry(void) {
         case RR_SKIPPED_CALL: {
             RR_skipped_call_args *args = &item->variant.call_args;
             //mz read kind first!
-            RR_COPY_ITEM(args->kind);
+            rr_fcopy(&args->kind, 1, 1, oldlog, newlog);
+
             switch(args->kind) {
                 case RR_CALL_CPU_MEM_RW:
                     RR_COPY_ITEM(args->variant.cpu_mem_rw_args);
@@ -171,9 +171,9 @@ static RR_prog_point copy_entry(void) {
                     sassert(0, 3);
             }
         } break;
-        case RR_LAST:
+        case RR_END_OF_LOG:
             //mz nothing to read
-            //ph We don't copy RR_LAST here; write out afterwards.
+            //ph We don't copy RR_END_OF_LOG here; write out afterwards.
             break;
         default:
             //mz unimplemented
@@ -243,9 +243,23 @@ int before_block_exec(CPUState *env, TranslationBlock *tb) {
         RR_log_entry *item = rr_get_queue_head();
         if (item != NULL) fseek(oldlog, item->header.file_pos, SEEK_SET);
 
-        while (prog_point.guest_instr_count < end_count && !feof(oldlog)) {
+        //rw: For some reason I need to add an interrupt entry at the beginning of the log?
+        RR_log_entry temp;
+
+        memset(&temp, 0, sizeof(RR_log_entry));
+        temp.header.kind = RR_INTERRUPT_REQUEST;
+        temp.header.callsite_loc = RR_CALLSITE_CPU_HANDLE_INTERRUPT_BEFORE;
+        temp.variant.pending_interrupts = 2;
+
+        fwrite(&temp.header.prog_point, sizeof(temp.header.prog_point), 1, newlog);
+        fwrite(&temp.header.kind, 1, 1, newlog);
+        fwrite(&temp.header.callsite_loc, 1, 1, newlog);
+        fwrite(&temp.variant.pending_interrupts, sizeof(temp.variant.pending_interrupts), 1, newlog);
+
+        while (prog_point.guest_instr_count < end_count && !rr_log_is_empty()) {
             prog_point = copy_entry();
         }
+        
         if (!feof(oldlog)) { // prog_point is the first one AFTER what we want
             printf("Reached end of old nondet log.\n");
         } else {
