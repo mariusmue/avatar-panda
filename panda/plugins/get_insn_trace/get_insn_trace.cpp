@@ -17,34 +17,36 @@ extern "C" {
 
 //llvm::FunctionPassManager *FPM = nullptr;
 
-int trace_block_exec(CPUState *cpu, TranslationBlock *tb){
-    printf("block exec:\n");
-    printf("\t\ttb->pc: %x\n", tb->pc);
-    printf("\t\ttb->cs_base: %x\n", tb->cs_base);
-    printf("\t\ttb->flags: %x\n", tb->flags);
-    printf("\t\ttb->llvm_tc_ptr: %x\n", tb->llvm_tc_ptr);
-    printf("\t\ttb->llvm_tc_end: %x\n", tb->llvm_tc_end);
+bool insn_translate(CPUState *cpu, target_ulong pc){
+    //printf("insn translate:\n");
+    //printf("\t\tpc: %x\n", pc);
+    return true;
+}
+
+int insn_exec(CPUState *cpu, target_ulong pc){
+    //printf("insn exec:\n");
+    printf("\t\tpc: %x\n", pc);
     return 0;
 }
 
 
 bool init_plugin(void *self){
-    printf("[get_llvm_trace] init_plugin\n");
+    printf("[get_insn_trace] init_plugin\n");
 
     panda_cb pcb;     
 
-    panda_enable_llvm();
-    panda_enable_llvm_helpers();
+    pcb.after_block_exec = insn_translate;
+    panda_register_callback(self, PANDA_CB_INSN_TRANSLATE, pcb);
 
-    pcb.after_block_exec = trace_block_exec;
-    panda_register_callback(self, PANDA_CB_AFTER_BLOCK_EXEC, pcb);
+    pcb.after_block_exec = insn_exec;
+    panda_register_callback(self, PANDA_CB_INSN_EXEC, pcb);
 
     return true;
 }
 
 
 void uninit_plugin(void *self){
-    printf("[get_llvm_trace] uninit_plugin\n");
+    printf("[get_insn_trace] uninit_plugin\n");
 }
 
 /*

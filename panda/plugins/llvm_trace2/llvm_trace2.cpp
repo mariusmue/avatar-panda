@@ -733,7 +733,10 @@ int before_block_exec(CPUState *env, TranslationBlock *tb) {
     // printf("a->env_ptr == b->env_ptr = %d\n",
     //(uint64_t)first_cpu->env_ptr == (uint64_t)cpus.tqh_first->env_ptr);
     // sleep(10);
+    static int counter = 0;
 
+    fprintf(stderr, "\t\t\t\t\tBasic block %d   PC: 0x%x\n", counter, tb->pc);
+    counter++;
     // write LLVM FUNCTION to pandalog
 
     // not related to LLVM bitcode
