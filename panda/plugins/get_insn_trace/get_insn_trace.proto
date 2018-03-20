@@ -1,0 +1,19 @@
+message BasicBlockEntry {
+    // incremental counter to keep track of executed basic blocks
+    optional uint64 bb_number = 1;
+
+    // start address for the basic block
+    optional uint64 address = 2;
+
+    // size of the basic block (in bytes)
+    optional uint32 size = 3;
+
+    // instruction count for the basic block
+    optional uint32 icount = 4;
+
+    // the actual content of the basic block (i.e. the opcodes for the
+    // instructions contained in the basick block)
+    optional bytes content = 5;
+}
+
+optional BasicBlockEntry bbentry = 31;
