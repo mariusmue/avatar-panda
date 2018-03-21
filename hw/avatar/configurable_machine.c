@@ -372,7 +372,7 @@ static void init_peripheral(QDict *device)
 
 #ifdef TARGET_ARM
 static void set_entry_point(QDict *conf, ARMCPU *cpuu)
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
 static void set_entry_point(QDict *conf, MIPSCPU *cpuu)
 #endif
 {
@@ -389,7 +389,7 @@ static void set_entry_point(QDict *conf, MIPSCPU *cpuu)
 
     cpuu->env.regs[15] = entry & (~1);
     cpuu->env.thumb = (entry & 1) == 1 ? 1 : 0;
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
     //Not implemented yet
 #endif
 
@@ -435,7 +435,7 @@ static ARMCPU *create_cpu(MachineState * ms, QDict *conf)
     set_feature(&cpuu->env, ARM_FEATURE_CONFIGURABLE);
     return cpuu;
 }
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
 static MIPSCPU *create_cpu(MachineState * ms, QDict *conf)
 {
     const char *cpu_model = ms->cpu_model;
@@ -473,7 +473,7 @@ static void board_init(MachineState * ms)
 {
 #ifdef TARGET_ARM
     ARMCPU *cpuu;
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
     MIPSCPU *cpuu;
 #endif
 

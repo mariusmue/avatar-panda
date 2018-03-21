@@ -12,7 +12,7 @@
 
 #ifdef TARGET_ARM
 #include "target/arm/cpu.h"
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
 #endif
 
 
@@ -23,7 +23,7 @@ uint64_t get_current_pc(void){
 #ifdef TARGET_ARM
     ARMCPU *cpu = ARM_CPU(qemu_get_cpu(0));
     return cpu->env.regs[15];
-#elif TARGET_MIPS
+#elif defined(TARGET_MIPS)
     return 0; /*  implement me */
 #endif
     return 0;
