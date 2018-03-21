@@ -16,4 +16,4 @@ message BasicBlockEntry {
     optional bytes content = 5;
 }
 
-optional BasicBlockEntry bbentry = 31;
+optional BasicBlockEntry basicblockEntry = 31;

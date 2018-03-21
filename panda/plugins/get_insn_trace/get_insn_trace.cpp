@@ -1,21 +1,82 @@
 #include "panda/plugin.h"
+#if defined(TARGET_ARM)
 
-#include "panda/tcg-llvm.h"
-#include <llvm/PassManager.h>
-#include <llvm/PassRegistry.h>
-#include <llvm/Analysis/Verifier.h>
-#include <llvm/ExecutionEngine/ExecutionEngine.h>
-#include <llvm/Transforms/IPO/PassManagerBuilder.h>
-//#include "llvm_taint_lib.h"
-
+#include <stdlib.h>
+#include "panda/plog-cc.hpp"
 
 extern "C" {
-    //TCGLLVMContext *tcg_llvm_ctx;
-    bool init_plugin(void *self);
-    void uninit_plugin(void *self);
+bool init_plugin(void *self);
+void uninit_plugin(void *self);
 }
 
-//llvm::FunctionPassManager *FPM = nullptr;
+extern PandaLog globalLog;
+
+int bb_insn_count = 0;
+int byte_count = 0;
+int fd;
+
+
+int before_block_exec(CPUState *cpu, TranslationBlock *tb){
+    static uint64_t bb_count = 0;
+    int ret;
+    uint8_t *code;
+    bb_insn_count = 0;
+
+    printf("===========before_block_exec - size: %x, icount: %x, pc: %x ============\n", tb->size, tb->icount, tb->pc);
+
+    fprintf(stderr, "===========before_block_exec - size: %x, icount: %x, pc: %x ============\n", tb->size, tb->icount, tb->pc);
+
+    // allocate space for the content of the basic block
+    code = (uint8_t *) calloc (tb->size + 1, sizeof(uint8_t));
+
+    ret = panda_virtual_memory_read(cpu, tb->pc, code, tb->size);
+    if (ret != 0 ){
+        fprintf(stderr, "panda_virtual_memory_read() failed\n");
+        perror("");
+        return -1;
+    }
+
+    fprintf(stderr, "code: ");
+    for (int i = 0; i < tb->size; i++) {
+        fprintf(stderr, "%x ", code[i]);
+    }
+    ret = write(fd, code, tb->size);
+    if (ret != tb->size) {
+        fprintf(stderr, "read() failed\n");
+        perror("");
+        return -1;
+    }
+    byte_count += ret;
+    fprintf(stderr, "\n");
+
+    //if (pandalog) {
+    //    std::unique_ptr<panda::LogEntry> ple(new panda::LogEntry());
+    //    //ple->mutable_llvmentry()->set_type(FunctionCode::BB);
+
+    //    ple->mutable_llvmentry()->set_tb_num(123453);
+    //    ple->mutable_llvmentry()->set_condition(444444);
+
+    //    globalLog.write_entry(std::move(ple));
+    //}
+
+    // write basic block to pandalog
+    if (pandalog) {
+        std::unique_ptr<panda::LogEntry> ple(new panda::LogEntry());
+        ple->mutable_basicblockentry()->set_bb_number(bb_count);
+        ple->mutable_basicblockentry()->set_address(tb->pc);
+        ple->mutable_basicblockentry()->set_size(tb->size);
+        ple->mutable_basicblockentry()->set_icount(tb->icount);
+        ple->mutable_basicblockentry()->set_content((char *) code, tb->size);
+        globalLog.write_entry(std::move(ple));
+    }
+    bb_count++;
+
+    //TCGContext *tcg = (TCGContext *) tb->tc_ptr;
+    //fprintf(stderr, "%x", *(tcg->code_ptr));
+    //panda_disas(stderr, &tb->pc, tb->size);
+
+    return 0;
+}
 
 bool insn_translate(CPUState *cpu, target_ulong pc){
     //printf("insn translate:\n");
@@ -24,8 +85,18 @@ bool insn_translate(CPUState *cpu, target_ulong pc){
 }
 
 int insn_exec(CPUState *cpu, target_ulong pc){
-    //printf("insn exec:\n");
-    printf("\t\tpc: %x\n", pc);
+    //static int count = 0;
+    //CPUARMState *pt = (CPUARMState *) cpu->env_ptr;
+
+    //if (count % 2 == 0) printf("\t\t");
+    printf("\t\t%x. cpu->panda_guest_pc: %lx\n", bb_insn_count, cpu->panda_guest_pc);
+
+    //if (count % 2 == 0) printf("\t\t");
+    //printf("\t\t   cpu->ent_ptr->pc: %lx\n", pt->pc);
+
+    //count++;
+    bb_insn_count++;
+
     return 0;
 }
 
@@ -35,11 +106,18 @@ bool init_plugin(void *self){
 
     panda_cb pcb;     
 
-    pcb.after_block_exec = insn_translate;
+    panda_disable_precise_pc();
+
+    pcb.before_block_exec = before_block_exec;
+    panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
+
+    pcb.insn_translate = insn_translate;
     panda_register_callback(self, PANDA_CB_INSN_TRANSLATE, pcb);
 
-    pcb.after_block_exec = insn_exec;
+    pcb.insn_exec = insn_exec;
     panda_register_callback(self, PANDA_CB_INSN_EXEC, pcb);
+
+    fd = open("/tmp/tmpfile", O_WRONLY | O_CREAT | O_TRUNC, 0744);
 
     return true;
 }
@@ -47,12 +125,11 @@ bool init_plugin(void *self){
 
 void uninit_plugin(void *self){
     printf("[get_insn_trace] uninit_plugin\n");
+    fprintf(stderr, "total written bytes: %x (%d)\n", byte_count, byte_count);
+    if (pandalog){
+        printf("pandalog\n");
+    }
 }
 
-/*
-panda_enable_llvm();
-panda_enable_llvm_helpers();
-llvm::FunctionPassManager *fpm = tcg_llvm_ctx->getFunctionPassManager();
-fpm->add(new MyFunctionPass());
-FPM->doInitialization();
-*/
+
+#endif // TAGET_ARM

@@ -6,5 +6,7 @@
 
 PLUGIN_OBJFILES=$(PLUGIN_OBJ_DIR)/$(PLUGIN_NAME).o
 
+
+
 # Plugin dynamic library. At ../panda_$(PLUGIN_NAME).so
 $(PLUGIN_TARGET_DIR)/panda_$(PLUGIN_NAME).so: $(PLUGIN_OBJFILES)
