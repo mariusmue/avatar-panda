@@ -1,0 +1,14 @@
+#======================================================
+#        How to get a native instruction trace
+#======================================================
+0. Build avatar2 with and avatar-panda
+
+1. Execute replay:
+    ~/avatar2/targets/build/panda/panda/arm-softmmu/qemu-system-arm -M versatilepb -m 128M -replay <replay_name> -pandalog <pandalog_file> -panda get_insn_trace
+
+2. [Optional] Read the pandalog:
+    ~/avatar2/targets/src/avatar-panda/panda/scripts/plog_reader.py <pandalog_file>
+
+3. [Optional] Dump the instruction trace in a raw binary file:
+    ~/avatar2/targets/src/avatar-panda/panda/scripts/plog_reader.py <pandalog_file> | grep content | awk 'BEGIN{FS="\""}{print $4}' | while read line; do echo -n $line | base64 --decode; done > <raw_binary_file>
+
