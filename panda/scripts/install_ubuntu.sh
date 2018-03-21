@@ -34,7 +34,8 @@ then
   sudo apt-get -y install software-properties-common
   sudo add-apt-repository -y ppa:phulin/panda
   sudo apt-get update
-  sudo apt-get -y install libcapstone-dev libdwarf-dev python-pycparser
+  # TODO: fix the authentication problem on the following line
+  sudo apt-get -y --allow-unauthenticated install libcapstone-dev libdwarf-dev python-pycparser
 else
   if [ ! \( -e "/usr/local/lib/libdwarf.so" -o -e "/usr/lib/libdwarf.so" \) ]
   then
