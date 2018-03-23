@@ -106,7 +106,7 @@ bool init_plugin(void *self){
 
     panda_cb pcb;     
 
-    panda_disable_precise_pc();
+    panda_enable_precise_pc();
 
     pcb.before_block_exec = before_block_exec;
     panda_register_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, pcb);
