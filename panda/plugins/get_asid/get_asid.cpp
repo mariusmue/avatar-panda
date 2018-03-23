@@ -8,9 +8,32 @@ bool init_plugin(void *self);
 void uninit_plugin(void *self);
 }
 
+void print_state(CPUState *cpu){
+#if defined(TARGET_ARM)
+    int NREGS = 16;
+    CPUARMState *env = (CPUARMState *) cpu->env_ptr;
+
+    fprintf(stdout, "regs:\n");
+    for (int i=0; i<NREGS; i++){
+        fprintf(stdout, "\treg[%d]: %x\n", i, env->regs[i]);
+    }
+
+#elif defined(TARGET_I386)
+    printf("[print_state] not implemented yet for i386\n");
+#else
+    printf("[print_state] not implemented yet\n");
+#endif
+}
+
+
+
+
 int after_block_exec(CPUState *cpu, TranslationBlock *tb){
     fprintf(stderr, "[after_block_exec] current_asid: %x\n", panda_current_asid(cpu));
+    print_state(cpu);
 
+    uninit_plugin(NULL);
+    exit(1);
     return 0;
 }
 
