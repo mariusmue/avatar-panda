@@ -20,3 +20,4 @@ memsavep
 unigrams
 textprinter
 get_insn_trace
+get_asid
