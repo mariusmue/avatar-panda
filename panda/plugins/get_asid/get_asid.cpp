@@ -15,7 +15,7 @@ void print_state(CPUState *cpu){
 
     fprintf(stdout, "regs:\n");
     for (int i=0; i<NREGS; i++){
-        fprintf(stdout, "\treg[%d]: %x\n", i, env->regs[i]);
+        fprintf(stdout, "\treg[%d]: \t0x%x\n", i, env->regs[i]);
     }
 
 #elif defined(TARGET_I386)
@@ -32,7 +32,6 @@ int after_block_exec(CPUState *cpu, TranslationBlock *tb){
     fprintf(stderr, "[after_block_exec] current_asid: %x\n", panda_current_asid(cpu));
     print_state(cpu);
 
-    uninit_plugin(NULL);
     exit(1);
     return 0;
 }
