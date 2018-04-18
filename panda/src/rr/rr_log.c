@@ -86,6 +86,8 @@ inline double rr_get_percentage(void) {
         rr_nondet_log->last_prog_point.guest_instr_count;
 }
 
+/* rr_log_is_empty is defined directly in rr_log.h */
+/*
 static inline uint8_t rr_log_is_empty(void) {
     if ((rr_nondet_log->type == REPLAY) &&
         (rr_nondet_log->size == rr_nondet_log->bytes_read)) {
@@ -94,6 +96,7 @@ static inline uint8_t rr_log_is_empty(void) {
         return 0;
     }
 }
+*/
 
 RR_debug_level_type rr_debug_level = RR_DEBUG_NOISY;
 

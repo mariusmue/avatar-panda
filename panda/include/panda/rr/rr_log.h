@@ -193,4 +193,14 @@ static inline uint64_t rr_num_instr_before_next_interrupt(void) {
     }
 }
 
+static inline uint8_t rr_log_is_empty(void) {
+    if ((rr_nondet_log->type == REPLAY) &&
+        (rr_nondet_log->size == rr_nondet_log->bytes_read)) {
+        return 1;
+    } else {
+        return 0;
+    }
+}                                                                                                                                                                                                                   
+
+
 #endif
