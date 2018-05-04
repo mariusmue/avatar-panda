@@ -63,6 +63,14 @@
 #include "panda/tcg-llvm.h"
 #include "panda/helper_runtime.h"
 
+// added for klee
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Support/SourceMgr.h"
+extern "C" {
+#include <libgen.h>                                                                                                                                                                                                 
+}
+
+
 #if defined(CONFIG_SOFTMMU)
 
 // To support other architectures, make similar minor changes to op_helper.c
@@ -89,9 +97,12 @@ class TJITMemoryManager;
 struct TCGLLVMContextPrivate {
     LLVMContext& m_context;
     IRBuilder<> m_builder;
+    /* Added code to dump subset of module for klee */
 
     /* Current m_module */
     Module *m_module;
+    /* Added code to dump subset of module for klee */
+    //Module *klee_module;
 
     /* JIT engine */
     TJITMemoryManager *m_jitMemoryManager;
@@ -110,6 +121,8 @@ struct TCGLLVMContextPrivate {
 
     /* Function for current translation block */
     Function *m_tbFunction;
+    /* Added code to dump subset of module for klee */
+    //Function *klee_tbFunction;
 
     /* Current temp m_values */
     Value* m_values[TCG_MAX_TEMPS];
@@ -312,6 +325,9 @@ TCGLLVMContextPrivate::TCGLLVMContextPrivate()
     initMemoryHelpers();
 
     m_module = new Module("tcg-llvm", m_context);
+    /* code to dump subset of llvm code for klee */ 
+    //klee_module = new Module("klee_module", m_context);
+    //klee_builder = new IRBuilder(m_context);
 
     m_jitMemoryManager = new TJITMemoryManager();
 
@@ -1435,6 +1451,9 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
     return nb_args;
 }
 
+// resolved full path to the current executable
+extern const char *qemu_file;
+
 void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
 {
     /* Create new function for current translation block */
@@ -1454,20 +1473,68 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     */
 
     if (m_CPUArchStateType == nullptr) {
-        init_llvm_helpers();
+        // XXX: instead of adding all the helper functions I just extract the
+        // definition of the struct CPUARMState from llvm-helpers.bc
+        //init_llvm_helpers();
+
+        // code taken from helper_runtime.cpp - begin
+        // Read helper module, link into JIT, verify
+        char *exe = strdup(qemu_file);
+        //errs() << "qemu_file: " << qemu_file << "\n";
+        std::string bitcode(dirname(exe));
+        free(exe);
+        bitcode.append("/llvm-helpers.bc");
+
+        SMDiagnostic Err;
+        llvm::Module *helpermod = ParseIRFile(bitcode, Err, m_context);
+        if (!helpermod) {
+            Err.print("qemu", llvm::errs());
+            exit(1);
+        }
+        // code taken from helper_runtime.cpp - end
         m_CPUArchStateType = m_module->getTypeByName(m_CPUArchStateName);
     }
     assert(m_CPUArchStateType);
 
-    llvm::Type *pCPUArchStateType =
-        PointerType::getUnqual(m_CPUArchStateType);
-    FunctionType *tbFunctionType = FunctionType::get(wordType(),
-            std::vector<llvm::Type*>{pCPUArchStateType}, false);
-    m_tbFunction = Function::Create(tbFunctionType,
-            Function::PrivateLinkage, fName.str(), m_module);
-    BasicBlock *basicBlock = BasicBlock::Create(m_context,
-            "entry", m_tbFunction);
+
+
+
+
+    static int alal = 0;
+    if (alal < 1){
+        Module::iterator it = m_module->getFunctionList().begin();
+        for (; it != m_module->getFunctionList().end(); it++){
+            errs() << *it << "\n";
+        }
+        alal++;
+        errs() << "=============================================================================\n";
+    }
+    
+
+
+    /* pointer to CPUArchStateType */
+    llvm::Type *pCPUArchStateType = PointerType::getUnqual(m_CPUArchStateType);
+
+    /****************************************************************************/
+    /* Added code to dump subset of llvm code for klee (goal: dump a module suitable for klee) */ 
+    /****************************************************************************/
+
+    /* static FunctionType* get(Type *result, ArrayRef<Type *> params, bool isVarArg) */
+    FunctionType *tbFunctionType = FunctionType::get(wordType(), std::vector<llvm::Type*>{pCPUArchStateType}, false);
+    //FunctionType *tbFunctionType = FunctionType::get(wordType(), std::vector<llvm::Type*>{PointerType::getUnqual(IntegerType::get(m_context, 32))}, false);
+
+    /* static Function* Create(FunctionType *Ty, LinkageTypes Linkage, const Twine &N="", Module *M=nullptr) */
+    m_tbFunction = Function::Create(tbFunctionType, Function::PrivateLinkage, fName.str(), m_module);
+    //klee_tbFunction = Function::Create(tbFunctionType, Function::PrivateLinkage, fName.str(), klee_module);
+
+    /* static BasicBlock* Create(LLVMContext &Context, const Twine &Name="", Function *Parent=nullptr, BasicBlock *InsertBefore=nullptr) */
+    BasicBlock *basicBlock = BasicBlock::Create(m_context, "entry", m_tbFunction);
+    //BasicBlock *klee_basicBlock = BasicBlock::Create(m_context, "entry", klee_tbFunction);
+
+    /* specify that all the instructions will be inserted before basicBlock */
     m_builder.SetInsertPoint(basicBlock);
+    //static IRBuilder<> klee_builder(klee_basicBlock);
+    //klee_builder.SetInsertPoint(klee_basicBlock);
 
     m_tcgContext = s;
 
@@ -1498,6 +1565,22 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     InstrCount->setMetadata("host", RRUpdateMD);
     Value *One64 = constInt(64, 1);
 
+
+
+    /* Setup panda_guest_pc and last_pc stores */
+    //Constant *klee_GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->panda_guest_pc);
+    //Value *klee_GuestPCPtr = klee_builder.CreateIntToPtr(klee_GuestPCPtrInt, intPtrType(64), "guestpc");
+    //Constant *klee_LastPCPtrInt = constInt(sizeof(uintptr_t) * 8,  (uintptr_t)&tcg_llvm_runtime.last_pc);
+    //Value *klee_LastPCPtr = klee_builder.CreateIntToPtr(klee_LastPCPtrInt, intPtrType(64), "lastpc");
+
+    /* Setup rr_guest_instr_count stores */
+    //Constant *klee_InstrCountPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->rr_guest_instr_count);
+    //Value *klee_InstrCountPtr = klee_builder.CreateIntToPtr(klee_InstrCountPtrInt, intPtrType(64), "rrgicp");
+    //Instruction *klee_InstrCount = klee_builder.CreateLoad(klee_InstrCountPtr, true, "rrgic");
+    //klee_InstrCount->setMetadata("host", RRUpdateMD);
+
+
+
     /* Generate code for each opc */
     const TCGArg *args;
     TCGOp *op;
@@ -1511,24 +1594,45 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
             // volatile store of current PC
             Constant *PC = ConstantInt::get(intType(64), args[0]);
             Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
+
+            //Instruction *klee_LastPCSt = klee_builder.CreateStore(PC, LastPCPtr, true);
+            //Instruction *klee_GuestPCSt = klee_builder.CreateStore(PC, GuestPCPtr, true);
             // TRL 2014 hack to annotate that last instruction as the one
             // that sets PC
             GuestPCSt->setMetadata("host", PCUpdateMD);
 
-            InstrCount = dyn_cast<Instruction>(
-                    m_builder.CreateAdd(InstrCount, One64, "rrgic"));
+            //klee_LastPCSt->setMetadata("host", PCUpdateMD);
+            //klee_GuestPCSt->setMetadata("host", PCUpdateMD);
+            //klee_GuestPCSt->setMetadata("targetAsm", targetAsmMD);
+
+            InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(InstrCount, One64, "rrgic"));
+            //klee_InstrCount = dyn_cast<Instruction>(klee_builder.CreateAdd(klee_InstrCount, One64, "rrgic"));
+
             assert(InstrCount);
+            //assert(klee_InstrCount);
+
             Instruction *RRSt = m_builder.CreateStore(InstrCount, InstrCountPtr, true);
+            //Instruction *klee_RRSt = klee_builder.CreateStore(klee_InstrCount, klee_InstrCountPtr, true);
+
             InstrCount->setMetadata("host", RRUpdateMD);
+            //klee_InstrCount->setMetadata("host", RRUpdateMD);
+
             RRSt->setMetadata("host", RRUpdateMD);
+            //klee_RRSt->setMetadata("host", RRUpdateMD);
         }
 
         args += generateOperation(opc, op, args);
     }
 
+
+
+
+
     /* Finalize function */
-    if(!isa<ReturnInst>(m_tbFunction->back().back()))
+    if(!isa<ReturnInst>(m_tbFunction->back().back())){
         m_builder.CreateRet(ConstantInt::get(wordType(), 0));
+        //klee_builder.CreateRet(ConstantInt::get(wordType(), 0));
+    }
 
     /* Clean up unused m_values */
     for(int i=0; i<TCG_MAX_TEMPS; ++i)
@@ -1576,7 +1680,33 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
         qemu_log("%s", s.str().c_str());
         qemu_log("\n");
         qemu_log_flush();
+
+        // added code to dump llvm bitcode
+        static int dumped = 0;
+        //if (dumped == 0){
+            int fd = open("dumped_bitcode.bc", O_CREAT | O_WRONLY | O_TRUNC, 0666);
+            llvm::raw_fd_ostream OS(fd, true);
+            WriteBitcodeToFile(m_module, OS);
+            OS.flush();
+        //}
+        dumped = 1;
     }
+    /*
+    if(qemu_loglevel_mask(CPU_LOG_LLVM_IR)) {
+        std::string fcnString;
+        llvm::raw_string_ostream s(fcnString);
+        s << *klee_tbFunction;
+        qemu_log("OUT (LLVM IR):\n");
+        qemu_log("%s", s.str().c_str());
+        qemu_log("\n");
+        qemu_log_flush();
+
+        int fd = open("klee_bitcode.bc", O_CREAT | O_WRONLY | O_TRUNC, 0666);
+        llvm::raw_fd_ostream OS(fd, true);
+        WriteBitcodeToFile(klee_module, OS);
+        OS.flush();
+    }
+    */
 }
 
 /***********************************/
@@ -1697,4 +1827,3 @@ void tcg_llvm_write_module(TCGLLVMContext *l, const char *path)
 {
     l->writeModule(path);
 }
-
