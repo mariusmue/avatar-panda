@@ -1325,6 +1325,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
                               target_ulong pc, target_ulong cs_base,
                               uint32_t flags, int cflags)
 {
+    //static int my_count = 0;
+    //fprintf(stderr, "tb_gen_code (%d)\n", my_count++);
     CPUArchState *env = cpu->env_ptr;
     TranslationBlock *tb;
     tb_page_addr_t phys_pc, phys_page2;

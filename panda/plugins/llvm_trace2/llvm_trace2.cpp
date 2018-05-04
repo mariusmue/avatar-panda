@@ -735,7 +735,7 @@ int before_block_exec(CPUState *env, TranslationBlock *tb) {
     // sleep(10);
     static int counter = 0;
 
-    fprintf(stderr, "\t\t\t\t\tBasic block %d   PC: 0x%x\n", counter, tb->pc);
+    //fprintf(stderr, "\t\t\t\t\tBasic block %d   PC: 0x%x, instr_count: %ld\n", counter, tb->pc, env->rr_guest_instr_count);
     counter++;
     // write LLVM FUNCTION to pandalog
 
