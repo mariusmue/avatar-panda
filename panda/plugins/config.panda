@@ -22,3 +22,4 @@ textprinter
 get_insn_trace
 get_asid
 bufmon
+my_memdump
