@@ -1,34 +1,9 @@
-/* PANDABEGINCOMMENT
- * 
- * Authors:
- *  Tim Leek               tleek@ll.mit.edu
- *  Ryan Whelan            rwhelan@ll.mit.edu
- *  Joshua Hodosh          josh.hodosh@ll.mit.edu
- *  Michael Zhivich        mzhivich@ll.mit.edu
- *  Brendan Dolan-Gavitt   brendandg@gatech.edu
- * 
- * This work is licensed under the terms of the GNU GPL, version 2. 
- * See the COPYING file in the top-level directory. 
- * 
-PANDAENDCOMMENT */
 // XXX: plugin ported to panda2, starting from https://github.com/panda-re/panda/blob/panda1/qemu/panda_plugins/memdump/memdump.cpp
 
 // This needs to be defined before anything is included in order to get
 // the PRIx64 macro
 #define __STDC_FORMAT_MACROS
 
-/*
-extern "C" {
-
-#include "config.h"
-#include "qemu-common.h"
-#include "monitor.h"
-#include "cpu.h"
-#include "disas.h"
-
-
-}
-*/
 #include "panda/plugin.h"
 
 #include <stdio.h>
@@ -69,56 +44,6 @@ using namespace std;
 vector<struct mem_access> good_reads;
 vector<struct mem_access> writes;
 
-/*
-struct prog_point {
-    target_ulong caller;
-    target_ulong pc;
-    target_ulong cr3;
-    bool operator <(const prog_point &p) const {
-        return (this->pc < p.pc) || \
-               (this->pc == p.pc && this->caller < p.caller) || \
-               (this->pc == p.pc && this->caller == p.caller && this->cr3 < p.cr3);
-    }
-};
-
-struct fpos { unsigned long off; };
-std::map<prog_point,fpos> read_tracker;
-std::map<prog_point,fpos> write_tracker;
-FILE *read_log, *write_log;
-unsigned char *read_buf, *write_buf;
-unsigned long read_sz, write_sz;
-*/
-
-
-/*
-int mem_callback(CPUState *env, target_ulong pc, target_ulong addr,
-                       target_ulong size, void *buf,
-                       std::map<prog_point,fpos> &tracker, unsigned char *log) {
-    prog_point p = {};
-#ifdef TARGET_I386
-    panda_virtual_memory_rw(env, env->regs[R_EBP]+4, (uint8_t *)&p.caller, 4, 0);
-    if((env->hflags & HF_CPL_MASK) != 0) // Lump all kernel-mode CR3s together
-        p.cr3 = env->cr[3];
-#endif
-    p.pc = pc;
-    
-    //fseek(log, tracker[p].off, SEEK_SET);
-    //fwrite((unsigned char *)buf, size, 1, log);
-    fpos &fp = tracker[p];
-    memcpy(log+fp.off, buf, size);
-    fp.off += size;
-
-    return 1;
-}
-
-int mem_write_callback(CPUState *env, target_ulong pc, target_ulong addr, target_ulong size, void *buf) {
-    return mem_callback(env, pc, addr, size, buf, write_tracker, write_buf);
-}
-
-int mem_read_callback(CPUState *env, target_ulong pc, target_ulong addr, target_ulong size, void *buf) {
-    return mem_callback(env, pc, addr, size, buf, read_tracker, read_buf);
-}
-*/
 
 int mem_write_callback(CPUState *env, target_ulong pc, target_ulong addr, target_ulong size, void *buf) {
     struct mem_access ma;
@@ -137,19 +62,6 @@ int mem_write_callback(CPUState *env, target_ulong pc, target_ulong addr, target
     fprintf(stderr, "\n");
 
     writes.push_back(ma);
-
-
-
-    /*
-    prog_point p = {};
-#ifdef TARGET_I386
-    panda_virtual_memory_rw(env, env->regs[R_EBP]+4, (uint8_t *)&p.caller, 4, 0);
-    if((env->hflags & HF_CPL_MASK) != 0) // Lump all kernel-mode CR3s together
-        p.cr3 = env->cr[3];
-#endif
-    p.pc = pc;
-    write_tracker[p] += size;
-    */
 
     return 1;
 }
@@ -197,7 +109,6 @@ bool check_no_write(struct mem_access ma){
             error("Overlapping mem reads[2], handle this case!");
         }
         if (ma.addr >= el.addr && (ma.addr+ma.size) <= (el.addr+el.size)){
-            //fprintf(stderr, "[XXXXXXX] - pc: %x, addr: %x, size: %x\n", ma.pc, ma.addr, ma.size);
             return false;
         }
     }
@@ -231,17 +142,7 @@ int mem_read_callback(CPUState *env, target_ulong pc, target_ulong addr, target_
         fprintf(stderr, "0x%hhx ", ma.buf[i]);
     }
     fprintf(stderr, "\n");
-    /*
-    prog_point p = {};
-#ifdef TARGET_I386
-    panda_virtual_memory_rw(env, env->regs[R_EBP]+4, (uint8_t *)&p.caller, 4, 0);
-    if((env->hflags & HF_CPL_MASK) != 0) // Lump all kernel-mode CR3s together
-        p.cr3 = env->cr[3];
-#endif
-    p.pc = pc;
-    read_tracker[p] += size;
-    */
- 
+
     return 1;
 }
 
@@ -253,88 +154,16 @@ bool init_plugin(void *self) {
     // Enable memory logging
     panda_enable_memcb();
 
-
     pcb.virt_mem_before_read = mem_read_callback;
     panda_register_callback(self, PANDA_CB_VIRT_MEM_BEFORE_READ, pcb);
     pcb.virt_mem_before_write = mem_write_callback;
     panda_register_callback(self, PANDA_CB_VIRT_MEM_BEFORE_WRITE, pcb);
 
-
-
-
-
-
-/*
-    FILE *read_idx, *write_idx;
-    prog_point p = {};
-    unsigned long off = 0;
-    target_ulong size = 0;
-
-    read_idx = fopen("tap_reads.idx", "r");
-    if (read_idx) {
-        printf("Calculating read indices...\n");
-        fseek(read_idx, 4, SEEK_SET);
-        while (!feof(read_idx)) {
-            fread(&p, sizeof(p), 1, read_idx);
-            fread(&size, sizeof(target_ulong), 1, read_idx);
-            read_tracker[p].off = off;
-            off += size;
-        }
-
-        pcb.virt_mem_read = mem_read_callback;
-        panda_register_callback(self, PANDA_CB_VIRT_MEM_READ, pcb);
-
-        read_sz = off;
-        read_log = fopen("tap_reads.bin", "w+");
-        if (!read_log)
-            perror("fopen");
-        ftruncate(fileno(read_log), read_sz);
-
-        read_buf = (unsigned char *)mmap(NULL, read_sz, PROT_WRITE, MAP_SHARED, fileno(read_log), 0);
-        if (read_buf == MAP_FAILED) perror("mmap");
-        if (madvise(read_buf, read_sz, MADV_RANDOM) == -1)
-            perror("madvise");
-    }
-
-    // reset
-    off = 0;
-    size = 0;
-
-    write_idx = fopen("tap_writes.idx", "r");
-    if (write_idx) {
-        printf("Calculating write indices...\n");
-        fseek(write_idx, 4, SEEK_SET);
-        while (!feof(write_idx)) {
-            fread(&p, sizeof(p), 1, write_idx);
-            fread(&size, sizeof(target_ulong), 1, write_idx);
-            write_tracker[p].off = off;
-            off += size;
-        }
-
-        pcb.virt_mem_write = mem_write_callback;
-        panda_register_callback(self, PANDA_CB_VIRT_MEM_WRITE, pcb);
-
-        write_sz = off;
-        write_log = fopen("tap_writes.bin", "w+");
-        if (!write_log)
-            perror("fopen");
-        ftruncate(fileno(write_log), write_sz);
-
-        write_buf = (unsigned char *)mmap(NULL, write_sz, PROT_WRITE, MAP_SHARED, fileno(write_log), 0);
-        if (write_buf == MAP_FAILED) perror("mmap");
-        if (madvise(write_buf, write_sz, MADV_RANDOM) == -1)
-            perror("madvise");
-    }
-
-    // */
     return true;
 }
 
 void uninit_plugin(void *self) {
     fprintf(stderr, "[uninit_plugin] - Initial state:\n");
-
-    
-    // TODO: write file
     int reads_log = open("reads_log.bin", O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
     if(reads_log == -1) {
         printf("Couldn't write report:\n");

@@ -49,16 +49,6 @@ int before_block_exec(CPUState *cpu, TranslationBlock *tb){
     byte_count += ret;
     fprintf(stderr, "\n");
 
-    //if (pandalog) {
-    //    std::unique_ptr<panda::LogEntry> ple(new panda::LogEntry());
-    //    //ple->mutable_llvmentry()->set_type(FunctionCode::BB);
-
-    //    ple->mutable_llvmentry()->set_tb_num(123453);
-    //    ple->mutable_llvmentry()->set_condition(444444);
-
-    //    globalLog.write_entry(std::move(ple));
-    //}
-
     // write basic block to pandalog
     if (pandalog) {
         std::unique_ptr<panda::LogEntry> ple(new panda::LogEntry());
@@ -71,30 +61,15 @@ int before_block_exec(CPUState *cpu, TranslationBlock *tb){
     }
     bb_count++;
 
-    //TCGContext *tcg = (TCGContext *) tb->tc_ptr;
-    //fprintf(stderr, "%x", *(tcg->code_ptr));
-    //panda_disas(stderr, &tb->pc, tb->size);
-
     return 0;
 }
 
 bool insn_translate(CPUState *cpu, target_ulong pc){
-    //printf("insn translate:\n");
-    //printf("\t\tpc: %x\n", pc);
     return true;
 }
 
 int insn_exec(CPUState *cpu, target_ulong pc){
-    //static int count = 0;
-    //CPUARMState *pt = (CPUARMState *) cpu->env_ptr;
-
-    //if (count % 2 == 0) printf("\t\t");
     printf("\t\t%x. cpu->panda_guest_pc: %lx\n", bb_insn_count, cpu->panda_guest_pc);
-
-    //if (count % 2 == 0) printf("\t\t");
-    //printf("\t\t   cpu->ent_ptr->pc: %lx\n", pt->pc);
-
-    //count++;
     bb_insn_count++;
 
     return 0;

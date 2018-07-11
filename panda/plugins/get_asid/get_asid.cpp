@@ -29,16 +29,6 @@ void print_state(CPUState *cpu){
 void print_regs(CPUState *env, target_ulong pc){
 #ifdef TARGET_I386
     CPUX86State *cpu = (CPUX86State *) env->env_ptr;
-    //CPUArchState * cpu = (CPUArchState*) env;
-    /*
-    target_ulong reg_ah = env->regs[R_AH];
-    target_ulong reg_al = env->regs[R_AL];
-    printf("value of reg_ah: %x\n", reg_ah);
-    printf("value of reg_al: %x\n", reg_al);
-    printf("value of pc: %x\n", pc);
-    printf("value of ah: " TARGET_FMT_lx "\n", env->regs[R_AH]);
-    printf("value of ah: %x\n", env->regs[R_AH]);
-    */
     printf("value of ah: " TARGET_FMT_lx "\n", (cpu->regs[R_EAX] & 0xff) );
 #endif
 }
@@ -51,7 +41,6 @@ bool insn_translate(CPUState *cpu, target_ulong pc){
 int after_block_exec(CPUState *cpu, TranslationBlock *tb){
     fprintf(stdout, "[after_block_exec] current_asid: %x\n", panda_current_asid(cpu));
     print_state(cpu);
-    //print_regs(cpu, tb->pc);
 
     exit(1);
     return 0;
@@ -64,9 +53,6 @@ bool init_plugin(void *self){
 
     pcb.after_block_exec = after_block_exec;
     panda_register_callback(self, PANDA_CB_AFTER_BLOCK_EXEC, pcb);
-
-    //pcb.insn_translate = insn_translate;
-    //panda_register_callback(self, PANDA_CB_INSN_TRANSLATE, pcb);
 
     return true;
 }
