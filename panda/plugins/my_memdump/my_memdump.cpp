@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <vector>
 #include <iostream>
+#include <sstream>
 
 
 // These need to be extern "C" so that the ABI is compatible with
@@ -38,6 +39,9 @@ struct mem_access {
 };
 
 using namespace std;
+
+static bool make_symbolic = false;
+static vector<uint32_t> symb_addrs;
 
 #define GUEST_MEMORY_SIZE 0x100000 
 #define MAX_SIZE 100
@@ -135,6 +139,18 @@ int mem_read_callback(CPUState *env, target_ulong pc, target_ulong addr, target_
     return 1;
 }
 
+vector<uint32_t> parse_list_addrs(const string& s)
+{
+    vector<uint32_t> addrs;
+    string token;
+    istringstream tokenStream(s);
+    while (getline(tokenStream, token, '|')) {
+        uint32_t x = stoul(token, nullptr, 16);
+        addrs.push_back(x);
+    }
+    return addrs;
+}
+
 bool init_plugin(void *self) {
     panda_cb pcb;
 
@@ -142,6 +158,21 @@ bool init_plugin(void *self) {
     panda_enable_precise_pc();
     // Enable memory logging
     panda_enable_memcb();
+
+    panda_arg_list *args = panda_get_args("my_memdump");
+    if (args != NULL) {
+        make_symbolic = panda_parse_bool_opt(args, "make_symbolic", "Mark all memory accesses as symbolic");
+        if (make_symbolic) {
+            const char *addr_list = NULL;
+            addr_list = panda_parse_string_opt(args, "addrs", "", "List of adresses in hex, pipe char separated, to be marked as symbolic");
+            std::string addresses(addr_list);
+            symb_addrs = parse_list_addrs(addresses);
+            if (symb_addrs.size() <= 0) {
+                fprintf(stderr, "error: empty list of addresses\n");
+                return false;
+            }
+        }
+    }
 
     // initialize guest_memory
     memset(guest_memory_reads, 0, GUEST_MEMORY_SIZE);
@@ -178,9 +209,10 @@ void uninit_plugin(void *self) {
         return;
     }
 
+    char sym_flag;
     for (auto ma : serial_reads_DR){
         // write to file:
-        // address(32bit) || size(32bit) || content(size*8bit)
+        // address(32bit) || size(32bit) || content(size*8bit) || marked as symbolic or not 
         // XXX: by fixing the sizes we lose the adaptability of target_ulong
         if (write(serial_reads_log, &ma.addr, 4) != 4){
             fprintf(stderr, "Couldn't write ma.addr\n");
@@ -191,13 +223,27 @@ void uninit_plugin(void *self) {
             perror("write");
         }
         if (write(serial_reads_log, ma.buf, ma.size) != ma.size){
-            fprintf(stderr, "Couldn't write ma.size\n");
+            fprintf(stderr, "Couldn't write ma.buf\n");
+            perror("write");
+        }
+
+        if (std::find(symb_addrs.begin(), symb_addrs.end(), ma.addr) != symb_addrs.end()) {
+            sym_flag = 0x01;
+            fprintf(stderr, "[memdump] - make 0x%x symbolic\n", ma.addr);
+        } else {
+            sym_flag = 0x00;
+            fprintf(stderr, "[memdump] - DR make 0x%x not symbolic\n", ma.addr);
+        }
+
+        if (write(serial_reads_log, &sym_flag, 1) != 1){
+            fprintf(stderr, "Couldn't write ma.is_symbolic\n");
             perror("write");
         }
     }
+
     for (auto ma : serial_reads_FR){
         // write to file:
-        // address(32bit) || size(32bit) || content(size*8bit)
+        // address(32bit) || size(32bit) || content(size*8bit) || marked as symbolic or not 
         // XXX: by fixing the sizes we lose the adaptability of target_ulong
         if (write(serial_reads_log, &ma.addr, 4) != 4){
             fprintf(stderr, "Couldn't write ma.addr\n");
@@ -208,12 +254,23 @@ void uninit_plugin(void *self) {
             perror("write");
         }
         if (write(serial_reads_log, ma.buf, ma.size) != ma.size){
-            fprintf(stderr, "Couldn't write ma.size\n");
+            fprintf(stderr, "Couldn't write ma.buf\n");
+            perror("write");
+        }
+
+        if (std::find(symb_addrs.begin(), symb_addrs.end(), ma.addr) != symb_addrs.end()) {
+            sym_flag = 0x01;
+            fprintf(stderr, "[memdump] - make 0x%x symbolic\n", ma.addr);
+        } else {
+            fprintf(stderr, "[memdump] - FR make 0x%x not symbolic\n", ma.addr);
+            sym_flag = 0x00;
+        }
+
+        if (write(serial_reads_log, &sym_flag, 1) != 1){
+            fprintf(stderr, "Couldn't write ma.is_symbolic\n");
             perror("write");
         }
     }
-                                                
-
 
     tmp_buf = (uint8_t *) calloc(MAX_SIZE , sizeof(uint8_t));
     for (i=0; i<GUEST_MEMORY_SIZE; i++){
