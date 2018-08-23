@@ -28,7 +28,7 @@ int basic_blocks_bin;
 int before_block_exec(CPUState *env, TranslationBlock *tb) {
     printf("pc: %d\n", tb->pc);
 
-    if (write(serial_basic_blocks_bin, &tb->pc, 4) != 4){
+    if (write(basic_blocks_bin, &tb->pc, 4) != 4){
         fprintf(stderr, "Couldn't write pc\n");
         perror("write");
     }
