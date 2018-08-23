@@ -23,5 +23,5 @@ get_insn_trace
 get_asid
 bufmon
 my_memdump
-map_instr
+#map_instr
 get_basic_blocks
