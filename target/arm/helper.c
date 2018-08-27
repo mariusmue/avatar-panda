@@ -6113,7 +6113,8 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_DEBUG);
         return;
     case EXCP_IRQ:
-        env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);
+        // ebtaleb: its commenting that line or copying the newer function
+        /*env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);*/
         break;
     case EXCP_EXCEPTION_EXIT:
         do_v7m_exception_exit(env);
