@@ -5969,69 +5969,6 @@ static void switch_v7m_sp(CPUARMState *env, bool new_spsel)
     }
 }
 
-static void do_v7m_exception_exit(CPUARMState *env)
-{
-    uint32_t type;
-    uint32_t xpsr;
-
-    type = env->regs[15];
-    if (env->v7m.exception != ARMV7M_EXCP_NMI) {
-        /* Auto-clear FAULTMASK on return from other than NMI */
-        env->daif &= ~PSTATE_F;
-    }
-    if (env->v7m.exception != 0) {
-        armv7m_nvic_complete_irq(env->nvic, env->v7m.exception);
-    }
-
-    avatar_armv7m_exception_exit(env->v7m.exception, type);
-
-    /* Switch to the target stack.  */
-    switch_v7m_sp(env, (type & 4) != 0);
-    /* Pop registers.  */
-    env->regs[0] = v7m_pop(env);
-    env->regs[1] = v7m_pop(env);
-    env->regs[2] = v7m_pop(env);
-    env->regs[3] = v7m_pop(env);
-    env->regs[12] = v7m_pop(env);
-    env->regs[14] = v7m_pop(env);
-    env->regs[15] = v7m_pop(env);
-    if (env->regs[15] & 1) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "M profile return from interrupt with misaligned "
-                      "PC is UNPREDICTABLE\n");
-        /* Actual hardware seems to ignore the lsbit, and there are several
-         * RTOSes out there which incorrectly assume the r15 in the stack
-         * frame should be a Thumb-style "lsbit indicates ARM/Thumb" value.
-         */
-        env->regs[15] &= ~1U;
-    }
-    xpsr = v7m_pop(env);
-    xpsr_write(env, xpsr, 0xfffffdff);
-    /* Undo stack alignment.  */
-    if (xpsr & 0x200)
-        env->regs[13] |= 4;
-    /* ??? The exception return type specifies Thread/Handler mode.  However
-       this is also implied by the xPSR value. Not sure what to do
-       if there is a mismatch.  */
-    /* ??? Likewise for mismatches between the CONTROL register and the stack
-       pointer.  */
-}
-
-static void arm_log_exception(int idx)
-{
-    if (qemu_loglevel_mask(CPU_LOG_INT)) {
-        const char *exc = NULL;
-
-        if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {
-            exc = excnames[idx];
-        }
-        if (!exc) {
-            exc = "unknown";
-        }
-        qemu_log_mask(CPU_LOG_INT, "Taking exception %d [%s]\n", idx, exc);
-    }
-}
-
 static uint32_t arm_v7m_load_vector(ARMCPU *cpu)
 
 {
@@ -6056,73 +5993,32 @@ static uint32_t arm_v7m_load_vector(ARMCPU *cpu)
     return addr;
 }
 
-void arm_v7m_cpu_do_interrupt(CPUState *cs)
+static void v7m_exception_taken(ARMCPU *cpu, uint32_t lr)
 {
-    ARMCPU *cpu = ARM_CPU(cs);
+    /* Do the "take the exception" parts of exception entry,
+     * but not the pushing of state to the stack. This is
+     * similar to the pseudocode ExceptionTaken() function.
+     */
     CPUARMState *env = &cpu->env;
-    uint32_t xpsr = xpsr_read(env);
-    uint32_t lr;
     uint32_t addr;
 
-    arm_log_exception(cs->exception_index);
+    armv7m_nvic_acknowledge_irq(env->nvic);
+    switch_v7m_sp(env, 0);
+    /* Clear IT bits */
+    env->condexec_bits = 0;
+    env->regs[14] = lr;
+    addr = arm_v7m_load_vector(cpu);
+    env->regs[15] = addr & 0xfffffffe;
+    env->thumb = addr & 1;
+}
 
-    lr = 0xfffffff1;
-    if (env->v7m.control & R_V7M_CONTROL_SPSEL_MASK) {
-        lr |= 4;
-    }
-    if (env->v7m.exception == 0)
-        lr |= 8;
-
-    /* For exceptions we just mark as pending on the NVIC, and let that
-       handle it.  */
-    /* TODO: Need to escalate if the current priority is higher than the
-       one we're raising.  */
-    switch (cs->exception_index) {
-    case EXCP_UDEF:
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
-        env->v7m.cfsr |= R_V7M_CFSR_UNDEFINSTR_MASK;
-        return;
-    case EXCP_NOCP:
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
-        env->v7m.cfsr |= R_V7M_CFSR_NOCP_MASK;
-        return;
-    case EXCP_SWI:
-        /* The PC already points to the next instruction.  */
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
-        return;
-    case EXCP_PREFETCH_ABORT:
-    case EXCP_DATA_ABORT:
-        /* TODO: if we implemented the MPU registers, this is where we
-         * should set the MMFAR, etc from exception.fsr and exception.vaddress.
-         */
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
-        return;
-    case EXCP_BKPT:
-        if (semihosting_enabled()) {
-            int nr;
-            nr = arm_lduw_code(env, env->regs[15], arm_sctlr_b(env)) & 0xff;
-            if (nr == 0xab) {
-                env->regs[15] += 2;
-                qemu_log_mask(CPU_LOG_INT,
-                              "...handling as semihosting call 0x%x\n",
-                              env->regs[0]);
-                env->regs[0] = do_arm_semihosting(env);
-                return;
-            }
-        }
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_DEBUG);
-        return;
-    case EXCP_IRQ:
-        // ebtaleb: its commenting that line or copying the newer function
-        /*env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);*/
-        break;
-    case EXCP_EXCEPTION_EXIT:
-        do_v7m_exception_exit(env);
-        return;
-    default:
-        cpu_abort(cs, "Unhandled exception 0x%x\n", cs->exception_index);
-        return; /* Never happens.  Keep compiler happy.  */
-    }
+static void v7m_push_stack(ARMCPU *cpu)
+{
+    /* Do the "set up stack frame" part of exception entry,
+     * similar to pseudocode PushStack().
+     */
+    CPUARMState *env = &cpu->env;
+    uint32_t xpsr = xpsr_read(env);
 
     /* Align stack pointer if the guest wants that */
     if ((env->regs[13] & 4) && (env->v7m.ccr & R_V7M_CCR_STKALIGN_MASK)) {
@@ -6138,14 +6034,361 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     v7m_push(env, env->regs[2]);
     v7m_push(env, env->regs[1]);
     v7m_push(env, env->regs[0]);
-    switch_v7m_sp(env, 0);
-    /* Clear IT bits */
-    env->condexec_bits = 0;
-    env->regs[14] = lr;
-    addr = arm_v7m_load_vector(cpu);
-    env->regs[15] = addr & 0xfffffffe;
-    env->thumb = addr & 1;
 }
+
+
+static void do_v7m_exception_exit(ARMCPU *cpu)
+{
+    CPUARMState *env = &cpu->env;
+    uint32_t type;
+    uint32_t xpsr;
+    bool ufault = false;
+    bool return_to_sp_process = false;
+    bool return_to_handler = false;
+    bool rettobase = false;
+
+    /* We can only get here from an EXCP_EXCEPTION_EXIT, and
+     * arm_v7m_do_unassigned_access() enforces the architectural rule
+     * that jumps to magic addresses don't have magic behaviour unless
+     * we're in Handler mode (compare pseudocode BXWritePC()).
+     */
+    assert(env->v7m.exception != 0);
+
+    /* In the spec pseudocode ExceptionReturn() is called directly
+     * from BXWritePC() and gets the full target PC value including
+     * bit zero. In QEMU's implementation we treat it as a normal
+     * jump-to-register (which is then caught later on), and so split
+     * the target value up between env->regs[15] and env->thumb in
+     * gen_bx(). Reconstitute it.
+     */
+    type = env->regs[15];
+    if (env->thumb) {
+        type |= 1;
+    }
+
+    qemu_log_mask(CPU_LOG_INT, "Exception return: magic PC %" PRIx32
+                  " previous exception %d\n",
+                  type, env->v7m.exception);
+
+    if (extract32(type, 5, 23) != extract32(-1, 5, 23)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "M profile: zero high bits in exception "
+                      "exit PC value 0x%" PRIx32 " are UNPREDICTABLE\n", type);
+    }
+
+    if (env->v7m.exception != ARMV7M_EXCP_NMI) {
+        /* Auto-clear FAULTMASK on return from other than NMI */
+        env->daif &= ~PSTATE_F;
+    }
+
+    switch (armv7m_nvic_complete_irq(env->nvic, env->v7m.exception)) {
+    case -1:
+        /* attempt to exit an exception that isn't active */
+        ufault = true;
+        break;
+    case 0:
+        /* still an irq active now */
+        break;
+    case 1:
+        /* we returned to base exception level, no nesting.
+         * (In the pseudocode this is written using "NestedActivation != 1"
+         * where we have 'rettobase == false'.)
+         */
+        rettobase = true;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    switch (type & 0xf) {
+    case 1: /* Return to Handler */
+        return_to_handler = true;
+        break;
+    case 13: /* Return to Thread using Process stack */
+        return_to_sp_process = true;
+        /* fall through */
+    case 9: /* Return to Thread using Main stack */
+        if (!rettobase &&
+            !(env->v7m.ccr & R_V7M_CCR_NONBASETHRDENA_MASK)) {
+            ufault = true;
+        }
+        break;
+    default:
+        ufault = true;
+    }
+
+    avatar_armv7m_exception_exit(env->v7m.exception, type);
+
+    if (ufault) {
+        /* Bad exception return: instead of popping the exception
+         * stack, directly take a usage fault on the current stack.
+         */
+        env->v7m.cfsr |= R_V7M_CFSR_INVPC_MASK;
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        v7m_exception_taken(cpu, type | 0xf0000000);
+        qemu_log_mask(CPU_LOG_INT, "...taking UsageFault on existing "
+                      "stackframe: failed exception return integrity check\n");
+        return;
+    }
+
+    /* Switch to the target stack.  */
+    switch_v7m_sp(env, return_to_sp_process);
+    /* Pop registers.  */
+    env->regs[0] = v7m_pop(env);
+    env->regs[1] = v7m_pop(env);
+    env->regs[2] = v7m_pop(env);
+    env->regs[3] = v7m_pop(env);
+    env->regs[12] = v7m_pop(env);
+    env->regs[14] = v7m_pop(env);
+    env->regs[15] = v7m_pop(env);
+    if (env->regs[15] & 1) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "M profile return from interrupt with misaligned "
+                      "PC is UNPREDICTABLE\n");
+        /* Actual hardware seems to ignore the lsbit, and there are several
+         * RTOSes out there which incorrectly assume the r15 in the stack
+         * frame should be a Thumb-style "lsbit indicates ARM/Thumb" value.
+         */
+        env->regs[15] &= ~1U;
+    }
+    xpsr = v7m_pop(env);
+    xpsr_write(env, xpsr, 0xfffffdff);
+    /* Undo stack alignment.  */
+    if (xpsr & 0x200)
+        env->regs[13] |= 4;
+
+    /* The restored xPSR exception field will be zero if we're
+     * resuming in Thread mode. If that doesn't match what the
+     * exception return type specified then this is a UsageFault.
+     */
+    if (return_to_handler == (env->v7m.exception == 0)) {
+        /* Take an INVPC UsageFault by pushing the stack again. */
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        env->v7m.cfsr |= R_V7M_CFSR_INVPC_MASK;
+        v7m_push_stack(cpu);
+        v7m_exception_taken(cpu, type | 0xf0000000);
+        qemu_log_mask(CPU_LOG_INT, "...taking UsageFault on new stackframe: "
+                      "failed exception return integrity check\n");
+        return;
+    }
+
+    /* Otherwise, we have a successful exception exit. */
+    qemu_log_mask(CPU_LOG_INT, "...successful exception return\n");
+}
+
+static void arm_log_exception(int idx)
+{
+    if (qemu_loglevel_mask(CPU_LOG_INT)) {
+        const char *exc = NULL;
+
+        if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {
+            exc = excnames[idx];
+        }
+        if (!exc) {
+            exc = "unknown";
+        }
+        qemu_log_mask(CPU_LOG_INT, "Taking exception %d [%s]\n", idx, exc);
+    }
+}
+
+void arm_v7m_cpu_do_interrupt(CPUState *cs)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+    uint32_t lr;
+
+    arm_log_exception(cs->exception_index);
+
+    lr = 0xfffffff1;
+    if (env->v7m.control & R_V7M_CONTROL_SPSEL_MASK) {
+        lr |= 4;
+    }
+    if (env->v7m.exception == 0)
+        lr |= 8;
+
+    /* For exceptions we just mark as pending on the NVIC, and let that
+       handle it.  */
+    switch (cs->exception_index) {
+    case EXCP_UDEF:
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        env->v7m.cfsr |= R_V7M_CFSR_UNDEFINSTR_MASK;
+        break;
+    case EXCP_NOCP:
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        env->v7m.cfsr |= R_V7M_CFSR_NOCP_MASK;
+        break;
+    case EXCP_INVSTATE:
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        env->v7m.cfsr |= R_V7M_CFSR_INVSTATE_MASK;
+        break;
+    case EXCP_SWI:
+        /* The PC already points to the next instruction.  */
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
+        break;
+    case EXCP_PREFETCH_ABORT:
+    case EXCP_DATA_ABORT:
+        /* Note that for M profile we don't have a guest facing FSR, but
+         * the env->exception.fsr will be populated by the code that
+         * raises the fault, in the A profile short-descriptor format.
+         */
+        switch (env->exception.fsr & 0xf) {
+        case 0x8: /* External Abort */
+            switch (cs->exception_index) {
+            case EXCP_PREFETCH_ABORT:
+                env->v7m.cfsr |= R_V7M_CFSR_PRECISERR_MASK;
+                qemu_log_mask(CPU_LOG_INT, "...with CFSR.PRECISERR\n");
+                break;
+            case EXCP_DATA_ABORT:
+                env->v7m.cfsr |=
+                    (R_V7M_CFSR_IBUSERR_MASK | R_V7M_CFSR_BFARVALID_MASK);
+                env->v7m.bfar = env->exception.vaddress;
+                qemu_log_mask(CPU_LOG_INT,
+                              "...with CFSR.IBUSERR and BFAR 0x%x\n",
+                              env->v7m.bfar);
+                break;
+            }
+            armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_BUS);
+            break;
+        default:
+            /* All other FSR values are either MPU faults or "can't happen
+             * for M profile" cases.
+             */
+            switch (cs->exception_index) {
+            case EXCP_PREFETCH_ABORT:
+                env->v7m.cfsr |= R_V7M_CFSR_IACCVIOL_MASK;
+                qemu_log_mask(CPU_LOG_INT, "...with CFSR.IACCVIOL\n");
+                break;
+            case EXCP_DATA_ABORT:
+                env->v7m.cfsr |=
+                    (R_V7M_CFSR_DACCVIOL_MASK | R_V7M_CFSR_MMARVALID_MASK);
+                env->v7m.mmfar = env->exception.vaddress;
+                qemu_log_mask(CPU_LOG_INT,
+                              "...with CFSR.DACCVIOL and MMFAR 0x%x\n",
+                              env->v7m.mmfar);
+                break;
+            }
+            armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
+            break;
+        }
+        break;
+    case EXCP_BKPT:
+        if (semihosting_enabled()) {
+            int nr;
+            nr = arm_lduw_code(env, env->regs[15], arm_sctlr_b(env)) & 0xff;
+            if (nr == 0xab) {
+                env->regs[15] += 2;
+                qemu_log_mask(CPU_LOG_INT,
+                              "...handling as semihosting call 0x%x\n",
+                              env->regs[0]);
+                env->regs[0] = do_arm_semihosting(env);
+                return;
+            }
+        }
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_DEBUG);
+        break;
+    case EXCP_IRQ:
+        break;
+    case EXCP_EXCEPTION_EXIT:
+        do_v7m_exception_exit(cpu);
+        return;
+    default:
+        cpu_abort(cs, "Unhandled exception 0x%x\n", cs->exception_index);
+        return; /* Never happens.  Keep compiler happy.  */
+    }
+
+    v7m_push_stack(cpu);
+    v7m_exception_taken(cpu, lr);
+    qemu_log_mask(CPU_LOG_INT, "... as %d\n", env->v7m.exception);
+}
+
+//void arm_v7m_cpu_do_interrupt(CPUState *cs)
+//{
+//    ARMCPU *cpu = ARM_CPU(cs);
+//    CPUARMState *env = &cpu->env;
+//    uint32_t xpsr = xpsr_read(env);
+//    uint32_t lr;
+//    uint32_t addr;
+//
+//    arm_log_exception(cs->exception_index);
+//
+//    lr = 0xfffffff1;
+//    if (env->v7m.control & R_V7M_CONTROL_SPSEL_MASK) {
+//        lr |= 4;
+//    }
+//    if (env->v7m.exception == 0)
+//        lr |= 8;
+//
+//    /* For exceptions we just mark as pending on the NVIC, and let that
+//       handle it.  */
+//    /* TODO: Need to escalate if the current priority is higher than the
+//       one we're raising.  */
+//    switch (cs->exception_index) {
+//    case EXCP_UDEF:
+//        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+//        env->v7m.cfsr |= R_V7M_CFSR_UNDEFINSTR_MASK;
+//        return;
+//    case EXCP_NOCP:
+//        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+//        env->v7m.cfsr |= R_V7M_CFSR_NOCP_MASK;
+//        return;
+//    case EXCP_SWI:
+//        [> The PC already points to the next instruction.  <]
+//        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
+//        return;
+//    case EXCP_PREFETCH_ABORT:
+//    case EXCP_DATA_ABORT:
+//         TODO: if we implemented the MPU registers, this is where we
+//         should set the MMFAR, etc from exception.fsr and exception.vaddress.
+//        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
+//        return;
+//    case EXCP_BKPT:
+//        if (semihosting_enabled()) {
+//            int nr;
+//            nr = arm_lduw_code(env, env->regs[15], arm_sctlr_b(env)) & 0xff;
+//            if (nr == 0xab) {
+//                env->regs[15] += 2;
+//                qemu_log_mask(CPU_LOG_INT,
+//                              "...handling as semihosting call 0x%x\n",
+//                              env->regs[0]);
+//                env->regs[0] = do_arm_semihosting(env);
+//                return;
+//            }
+//        }
+//        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_DEBUG);
+//        return;
+//    case EXCP_IRQ:
+//        // ebtaleb: its commenting that line or copying the newer function
+//        [>env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);<]
+//        break;
+//    case EXCP_EXCEPTION_EXIT:
+//        do_v7m_exception_exit(env);
+//        return;
+//    default:
+//        cpu_abort(cs, "Unhandled exception 0x%x\n", cs->exception_index);
+//        return; [> Never happens.  Keep compiler happy.  <]
+//    }
+//
+//    [> Align stack pointer if the guest wants that <]
+//    if ((env->regs[13] & 4) && (env->v7m.ccr & R_V7M_CCR_STKALIGN_MASK)) {
+//        env->regs[13] -= 4;
+//        xpsr |= 0x200;
+//    }
+//    [> Switch to the handler mode.  <]
+//    v7m_push(env, xpsr);
+//    v7m_push(env, env->regs[15]);
+//    v7m_push(env, env->regs[14]);
+//    v7m_push(env, env->regs[12]);
+//    v7m_push(env, env->regs[3]);
+//    v7m_push(env, env->regs[2]);
+//    v7m_push(env, env->regs[1]);
+//    v7m_push(env, env->regs[0]);
+//    switch_v7m_sp(env, 0);
+//    [> Clear IT bits <]
+//    env->condexec_bits = 0;
+//    env->regs[14] = lr;
+//    addr = arm_v7m_load_vector(cpu);
+//    env->regs[15] = addr & 0xfffffffe;
+//    env->thumb = addr & 1;
+//}
 
 /* Function used to synchronize QEMU's AArch64 register set with AArch32
  * register set.  This is necessary when switching between AArch32 and AArch64
