@@ -3348,14 +3348,9 @@ int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
         if (l > len)
             l = len;
         phys_addr += (addr & ~TARGET_PAGE_MASK);
-        if (is_write) {
-            cpu_physical_memory_write_rom(cpu->cpu_ases[asidx].as,
-                                          phys_addr, buf, l);
-        } else {
-            address_space_rw(cpu->cpu_ases[asidx].as, phys_addr,
-                             MEMTXATTRS_UNSPECIFIED,
-                             buf, l, 0);
-        }
+        address_space_rw(cpu->cpu_ases[asidx].as, phys_addr,
+                         MEMTXATTRS_UNSPECIFIED,
+                         buf, l, is_write);
         len -= l;
         buf += l;
         addr += l;
