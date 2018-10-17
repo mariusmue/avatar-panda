@@ -285,6 +285,8 @@ const QEMULogItem qemu_log_items[] = {
     { CPU_LOG_TB_NOCHAIN, "nochain",
       "do not chain compiled TBs so that \"exec\" and \"cpu\" show\n"
       "complete traces" },
+    { LOG_AVATAR, "avatar",
+      "Show avatar related events\n" },
 #ifdef CONFIG_LLVM
     { CPU_LOG_LLVM_IR, "llvm_ir",
       "show generated LLVM IR code" },
