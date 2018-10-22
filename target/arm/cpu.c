@@ -555,6 +555,14 @@ static void arm_cpu_post_init(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
 
+    /* M profile implies PMSA. We have to do this here rather than
+     * in realize with the other feature-implication checks because
+     * we look at the PMSA bit to see if we should add some properties.
+     */
+    if (arm_feature(&cpu->env, ARM_FEATURE_M)) {
+      set_feature(&cpu->env, ARM_FEATURE_MPU);
+    }
+
     if (arm_feature(&cpu->env, ARM_FEATURE_CBAR) ||
         arm_feature(&cpu->env, ARM_FEATURE_CBAR_RO)) {
         qdev_property_add_static(DEVICE(obj), &arm_cpu_reset_cbar_property,
@@ -759,8 +767,14 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
         cpu->id_pfr1 &= ~0xf000;
     }
 
+    /* MPU can be configured out of a PMSA CPU either by setting has-mpu
+     * to false or by setting pmsav7-dregion to 0.
+     */
     if (!cpu->has_mpu) {
-        unset_feature(env, ARM_FEATURE_MPU);
+      cpu->pmsav7_dregion = 0;
+    }
+    if (cpu->pmsav7_dregion == 0) {
+      cpu->has_mpu = false;
     }
 
     if (arm_feature(env, ARM_FEATURE_MPU) &&

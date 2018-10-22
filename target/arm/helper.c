@@ -3152,6 +3152,11 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         return;
     }
 
+    if (arm_feature(env, ARM_FEATURE_MPU) && !cpu->has_mpu) {
+        /* M bit is RAZ/WI for PMSA with no MPU implemented */
+        value &= ~SCTLR_M;
+    }
+
     raw_write(env, ri, value);
     /* ??? Lots of these bits are not implemented.  */
     /* This may enable/disable the MMU, so do a TLB flush.  */
@@ -7004,6 +7009,9 @@ static inline uint32_t regime_el(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_S1SE1:
     case ARMMMUIdx_S1NSE0:
     case ARMMMUIdx_S1NSE1:
+    case ARMMMUIdx_MPriv:
+    case ARMMMUIdx_MNegPri:
+    case ARMMMUIdx_MUser:
         return 1;
     default:
         g_assert_not_reached();
@@ -7020,6 +7028,9 @@ static inline bool regime_is_secure(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_S1NSE1:
     case ARMMMUIdx_S1E2:
     case ARMMMUIdx_S2NS:
+    case ARMMMUIdx_MPriv:
+    case ARMMMUIdx_MNegPri:
+    case ARMMMUIdx_MUser:
         return false;
     case ARMMMUIdx_S1E3:
     case ARMMMUIdx_S1SE0:
@@ -7040,6 +7051,24 @@ static inline uint32_t regime_sctlr(CPUARMState *env, ARMMMUIdx mmu_idx)
 static inline bool regime_translation_disabled(CPUARMState *env,
                                                ARMMMUIdx mmu_idx)
 {
+    if (arm_feature(env, ARM_FEATURE_M)) {
+        switch (env->v7m.mpu_ctrl &
+                (R_V7M_MPU_CTRL_ENABLE_MASK | R_V7M_MPU_CTRL_HFNMIENA_MASK)) {
+            case R_V7M_MPU_CTRL_ENABLE_MASK:
+                /* Enabled, but not for HardFault and NMI */
+                return mmu_idx == ARMMMUIdx_MNegPri;
+            case R_V7M_MPU_CTRL_ENABLE_MASK | R_V7M_MPU_CTRL_HFNMIENA_MASK:
+                /* Enabled for all cases */
+                return false;
+            case 0:
+            default:
+                /* HFNMIENA set and ENABLE clear is UNPREDICTABLE, but
+                 * we warned about that in armv7m_nvic.c when the guest set it.
+                 */
+                return true;
+        }
+    }
+
     if (mmu_idx == ARMMMUIdx_S2NS) {
         return (env->cp15.hcr_el2 & HCR_VM) == 0;
     }
@@ -7061,6 +7090,17 @@ static inline TCR *regime_tcr(CPUARMState *env, ARMMMUIdx mmu_idx)
     return &env->cp15.tcr_el[regime_el(env, mmu_idx)];
 }
 
+/* Convert a possible stage1+2 MMU index into the appropriate
+ * stage 1 MMU index
+ */
+static inline ARMMMUIdx stage_1_mmu_idx(ARMMMUIdx mmu_idx)
+{
+    if (mmu_idx == ARMMMUIdx_S12NSE0 || mmu_idx == ARMMMUIdx_S12NSE1) {
+        mmu_idx += (ARMMMUIdx_S1NSE0 - ARMMMUIdx_S12NSE0);
+    }
+    return mmu_idx;
+}
+
 /* Returns TBI0 value for current regime el */
 uint32_t arm_regime_tbi0(CPUARMState *env, ARMMMUIdx mmu_idx)
 {
@@ -7070,9 +7110,7 @@ uint32_t arm_regime_tbi0(CPUARMState *env, ARMMMUIdx mmu_idx)
     /* For EL0 and EL1, TBI is controlled by stage 1's TCR, so convert
        * a stage 1+2 mmu index into the appropriate stage 1 mmu index.
        */
-    if (mmu_idx == ARMMMUIdx_S12NSE0 || mmu_idx == ARMMMUIdx_S12NSE1) {
-        mmu_idx += ARMMMUIdx_S1NSE0;
-    }
+    mmu_idx = stage_1_mmu_idx(mmu_idx);
 
     tcr = regime_tcr(env, mmu_idx);
     el = regime_el(env, mmu_idx);
@@ -7093,9 +7131,7 @@ uint32_t arm_regime_tbi1(CPUARMState *env, ARMMMUIdx mmu_idx)
     /* For EL0 and EL1, TBI is controlled by stage 1's TCR, so convert
        * a stage 1+2 mmu index into the appropriate stage 1 mmu index.
        */
-    if (mmu_idx == ARMMMUIdx_S12NSE0 || mmu_idx == ARMMMUIdx_S12NSE1) {
-        mmu_idx += ARMMMUIdx_S1NSE0;
-    }
+    mmu_idx = stage_1_mmu_idx(mmu_idx);
 
     tcr = regime_tcr(env, mmu_idx);
     el = regime_el(env, mmu_idx);
@@ -7141,9 +7177,7 @@ static inline bool regime_using_lpae_format(CPUARMState *env,
  * on whether the long or short descriptor format is in use. */
 bool arm_s1_regime_using_lpae_format(CPUARMState *env, ARMMMUIdx mmu_idx)
 {
-    if (mmu_idx == ARMMMUIdx_S12NSE0 || mmu_idx == ARMMMUIdx_S12NSE1) {
-        mmu_idx += ARMMMUIdx_S1NSE0;
-    }
+    mmu_idx = stage_1_mmu_idx(mmu_idx);
 
     return regime_using_lpae_format(env, mmu_idx);
 }
@@ -7153,6 +7187,7 @@ static inline bool regime_is_user(CPUARMState *env, ARMMMUIdx mmu_idx)
     switch (mmu_idx) {
     case ARMMMUIdx_S1SE0:
     case ARMMMUIdx_S1NSE0:
+    case ARMMMUIdx_MUser:
         return true;
     default:
         return false;
@@ -8126,18 +8161,60 @@ static inline void get_phys_addr_pmsav7_default(CPUARMState *env,
                                                 ARMMMUIdx mmu_idx,
                                                 int32_t address, int *prot)
 {
-    *prot = PAGE_READ | PAGE_WRITE;
-    switch (address) {
-    case 0xF0000000 ... 0xFFFFFFFF:
-        if (regime_sctlr(env, mmu_idx) & SCTLR_V) { /* hivecs execing is ok */
+    if (!arm_feature(env, ARM_FEATURE_M)) {
+        *prot = PAGE_READ | PAGE_WRITE;
+        switch (address) {
+        case 0xF0000000 ... 0xFFFFFFFF:
+            if (regime_sctlr(env, mmu_idx) & SCTLR_V) {
+                /* hivecs execing is ok */
+                *prot |= PAGE_EXEC;
+            }
+            break;
+        case 0x00000000 ... 0x7FFFFFFF:
             *prot |= PAGE_EXEC;
+            break;
         }
-        break;
-    case 0x00000000 ... 0x7FFFFFFF:
-        *prot |= PAGE_EXEC;
-        break;
+    } else {
+        /* Default system address map for M profile cores.
+         * The architecture specifies which regions are execute-never;
+         * at the MPU level no other checks are defined.
+         */
+        switch (address) {
+        case 0x00000000 ... 0x1fffffff: /* ROM */
+        case 0x20000000 ... 0x3fffffff: /* SRAM */
+        case 0x60000000 ... 0x7fffffff: /* RAM */
+        case 0x80000000 ... 0x9fffffff: /* RAM */
+            *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+            break;
+        case 0x40000000 ... 0x5fffffff: /* Peripheral */
+        case 0xa0000000 ... 0xbfffffff: /* Device */
+        case 0xc0000000 ... 0xdfffffff: /* Device */
+        case 0xe0000000 ... 0xffffffff: /* System */
+            *prot = PAGE_READ | PAGE_WRITE;
+            break;
+        default:
+            g_assert_not_reached();
+        }
+    }
+}
+
+static bool pmsav7_use_background_region(ARMCPU *cpu,
+                                         ARMMMUIdx mmu_idx, bool is_user)
+{
+    /* Return true if we should use the default memory map as a
+     * "background" region if there are no hits against any MPU regions.
+     */
+    CPUARMState *env = &cpu->env;
+
+    if (is_user) {
+        return false;
     }
 
+    if (arm_feature(env, ARM_FEATURE_M)) {
+        return env->v7m.mpu_ctrl & R_V7M_MPU_CTRL_PRIVDEFENA_MASK;
+    } else {
+        return regime_sctlr(env, mmu_idx) & SCTLR_BR;
+    }
 }
 
 static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
@@ -8166,16 +8243,18 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
             }
 
             if (!rsize) {
-                qemu_log_mask(LOG_GUEST_ERROR, "DRSR.Rsize field can not be 0");
+                qemu_log_mask(LOG_GUEST_ERROR,
+                        "DRSR[%d]: Rsize field cannot be 0\n", n);
                 continue;
             }
             rsize++;
             rmask = (1ull << rsize) - 1;
 
             if (base & rmask) {
-                qemu_log_mask(LOG_GUEST_ERROR, "DRBAR %" PRIx32 " misaligned "
-                              "to DRSR region size, mask = %" PRIx32,
-                              base, rmask);
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "DRBAR[%d]: 0x%" PRIx32 " misaligned "
+                              "to DRSR region size, mask = 0x%" PRIx32 "\n",
+                              n, base, rmask);
                 continue;
             }
 
@@ -8212,9 +8291,10 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
                 }
             }
             if (rsize < TARGET_PAGE_BITS) {
-                qemu_log_mask(LOG_UNIMP, "No support for MPU (sub)region"
+                qemu_log_mask(LOG_UNIMP,
+                              "DRSR[%d]: No support for MPU (sub)region "
                               "alignment of %" PRIu32 " bits. Minimum is %d\n",
-                              rsize, TARGET_PAGE_BITS);
+                              n, rsize, TARGET_PAGE_BITS);
                 continue;
             }
             if (srdis) {
@@ -8224,8 +8304,7 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
         }
 
         if (n == -1) { /* no hits */
-            if (cpu->pmsav7_dregion &&
-                (is_user || !(regime_sctlr(env, mmu_idx) & SCTLR_BR))) {
+            if (!pmsav7_use_background_region(cpu, mmu_idx, is_user)) {
                 /* background fault */
                 *fsr = 0;
                 return true;
@@ -8249,8 +8328,8 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
                     break;
                 default:
                     qemu_log_mask(LOG_GUEST_ERROR,
-                                  "Bad value for AP bits in DRACR %"
-                                  PRIx32 "\n", ap);
+                                  "DRACR[%d]: Bad value for AP bits: 0x%"
+                                  PRIx32 "\n", n, ap);
                 }
             } else { /* Priv. mode AP bits decoding */
                 switch (ap) {
@@ -8267,8 +8346,8 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
                     break;
                 default:
                     qemu_log_mask(LOG_GUEST_ERROR,
-                                  "Bad value for AP bits in DRACR %"
-                                  PRIx32 "\n", ap);
+                                  "DRACR[%d]: Bad value for AP bits: 0x%"
+                                  PRIx32 "\n", n, ap);
                 }
             }
 
@@ -8397,7 +8476,7 @@ static bool get_phys_addr(CPUARMState *env, target_ulong address,
             int ret;
 
             ret = get_phys_addr(env, address, access_type,
-                                mmu_idx + ARMMMUIdx_S1NSE0, &ipa, attrs,
+                                stage_1_mmu_idx(mmu_idx), &ipa, attrs,
                                 prot, page_size, fsr, fi);
 
             /* If S1 fails or S2 is disabled, return early.  */
@@ -8418,7 +8497,7 @@ static bool get_phys_addr(CPUARMState *env, target_ulong address,
             /*
              * For non-EL2 CPUs a stage1+stage2 translation is just stage 1.
              */
-            mmu_idx += ARMMMUIdx_S1NSE0;
+            mmu_idx += stage_1_mmu_idx(mmu_idx);
         }
     }
 
@@ -8446,9 +8525,21 @@ static bool get_phys_addr(CPUARMState *env, target_ulong address,
      */
     if (arm_feature(env, ARM_FEATURE_MPU) &&
         arm_feature(env, ARM_FEATURE_V7)) {
+        bool ret;
         *page_size = TARGET_PAGE_SIZE;
-        return get_phys_addr_pmsav7(env, address, access_type, mmu_idx,
-                                    phys_ptr, prot, fsr);
+        ret = get_phys_addr_pmsav7(env, address, access_type, mmu_idx,
+                                   phys_ptr, prot, fsr);
+        qemu_log_mask(CPU_LOG_MMU, "PMSAv7 MPU lookup for %s at 0x%08" PRIx32
+                      " mmu_idx %u -> %s (prot %c%c%c)\n",
+                      access_type == 1 ? "reading" :
+                      (access_type == 2 ? "writing" : "execute"),
+                      (uint32_t)address, mmu_idx,
+                      ret ? "Miss" : "Hit",
+                      *prot & PAGE_READ ? 'r' : '-',
+                      *prot & PAGE_WRITE ? 'w' : '-',
+                      *prot & PAGE_EXEC ? 'x' : '-');
+
+        return ret;
     }
 
     if (regime_translation_disabled(env, mmu_idx)) {
@@ -8494,7 +8585,8 @@ bool arm_tlb_fill(CPUState *cs, vaddr address,
     int ret;
     MemTxAttrs attrs = {};
 
-    ret = get_phys_addr(env, address, access_type, mmu_idx, &phys_addr,
+    ret = get_phys_addr(env, address, access_type,
+                        core_to_arm_mmu_idx(env, mmu_idx), &phys_addr,
                         &attrs, &prot, &page_size, fsr, fi);
     if (!ret) {
         /* Map a single [sub]page.  */
@@ -8519,10 +8611,11 @@ hwaddr arm_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
     bool ret;
     uint32_t fsr;
     ARMMMUFaultInfo fi = {};
+    ARMMMUIdx mmu_idx = core_to_arm_mmu_idx(env, cpu_mmu_index(env, false));
 
     *attrs = (MemTxAttrs) {};
 
-    ret = get_phys_addr(env, addr, 0, cpu_mmu_index(env, false), &phys_addr,
+    ret = get_phys_addr(env, addr, 0, mmu_idx, &phys_addr,
                         attrs, &prot, &page_size, &fsr, &fi);
 
     if (ret) {
