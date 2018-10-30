@@ -20,6 +20,111 @@
 #include <iostream>
 #include <sstream>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+// #TODO: implement address resolution
+int implement_GEP(int address);
+
+struct gm_info {
+    int start_address;
+    int size;
+    unsigned char *gm_chunk; 
+};
+
+int n_records = 0;
+struct gm_info *gm_array;
+
+int main(){
+    int i, size;
+    int reads_log;
+    int start_address;
+
+    // allocate guest_memory according to the memory ranges that are specified in guest_memory.bin
+    reads_log = open("guest_memory.bin", O_RDONLY);
+    if (reads_log == -1){
+        printf("Couldn't open guest_memory.bin:\n");
+        perror("fopen");
+        exit(3);
+    }
+
+    // first of all, read the number of records
+    if (read(reads_log, &n_records, 4) != 4){
+        printf("Couldn't read n_records\n");
+        perror("write");
+        exit(3);
+    }
+
+    printf("n_records: %d\n", n_records);
+
+    printf("Allocating chunks of guest_memory:\n");
+    gm_array = (struct gm_info *) calloc (n_records, sizeof(struct gm_info));
+
+    for (i=0; i<n_records; i++){
+        if(read(reads_log, &start_address, 4) != 4){
+            printf("Couldn't read address\n");
+            perror("write");
+            exit(3);
+        }
+        if (read(reads_log, &size, 4) != 4){
+            printf("Couldn't read size\n");
+            perror("write");
+            exit(3);
+        }
+        printf("address: 0x%x, size: 0x%x\n", start_address, size);
+
+        gm_array[i].start_address = start_address;
+        gm_array[i].size = size;
+        gm_array[i].gm_chunk = (unsigned char *) calloc (size, sizeof(unsigned char));
+    }
+    implement_GEP(0x8004000);
+
+    return 0;
+}
+
+int implement_GEP(int address){
+    int i;
+    int offset;
+    int target_byte;
+
+    for (i=0; i<n_records; i++){
+        // check if it's the right chunk
+        //printf("start_address: 0x%x\n", gm_array[i].start_address);
+        //printf("size: 0x%x\n", gm_array[i].size);
+        //printf("address: 0x%x\n", address);
+        //printf("start_address+size: 0x%x\n", gm_array[i].start_address + gm_array[i].size);
+
+        if (gm_array[i].start_address <= address  &&  (gm_array[i].start_address + gm_array[i].size) > address){
+            break;
+        }
+    }
+    if (i>=n_records){
+        printf("address 0x%x does not belong to any allocated gm_chunk\n", address);
+        exit(1);
+    }
+    offset = address - gm_array[i].start_address;
+    //printf("offset: 0x%x\n", offset);
+    target_byte = gm_array[i].gm_chunk[offset];
+    
+    return target_byte;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // These need to be extern "C" so that the ABI is compatible with
 // QEMU/PANDA, which is written in C
@@ -328,3 +433,5 @@ void uninit_plugin(void *self) {
     close(reads_log);
     close(serial_reads_log);
 }
+
+
