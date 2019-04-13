@@ -280,6 +280,8 @@ static void armv7m_reset(void *opaque)
     cpu_reset(CPU(cpu));
 }
 
+// Hotfix: Forward declaration of armv7m_load_kernel
+void armv7m_load_kernel(ARMCPU *cpu, const char *kernel_filename, int mem_size);
 /* Init CPU and memory for a v7-M based board.
    mem_size is in bytes.
    Returns the ARMv7M device.  */
