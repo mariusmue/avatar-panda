@@ -25,6 +25,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+
+//MM endainness fix for now
+#include <byteswap.h>
+
 using namespace std;
 
 static bool make_symbolic = false;
@@ -68,12 +72,16 @@ int allocate_guest_memory_chunks(){
         exit(3);
     }
 
+    printf("n_records: %d\n", n_records);
     // first of all, read the number of records
     if (read(reads_log, &n_records, 4) != 4){
         printf("Couldn't read n_records\n");
         perror("write");
         exit(3);
     }
+
+    printf("n_records: %d\n", n_records);
+    n_records = __bswap_32 (n_records);    
 
     printf("n_records: %d\n", n_records);
 
@@ -92,8 +100,11 @@ int allocate_guest_memory_chunks(){
             perror("write");
             exit(3);
         }
+	start_address = __bswap_32(start_address);
+	size = __bswap_32(size);
         printf("address: 0x%x, size: 0x%x\n", start_address, size);
 
+	
         gm_reads[i].start_address = start_address;
         gm_reads[i].size = size;
         gm_reads[i].gm_chunk = (uint8_t *) calloc (size, sizeof(uint8_t));
