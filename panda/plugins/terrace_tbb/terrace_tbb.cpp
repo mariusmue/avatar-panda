@@ -52,7 +52,6 @@ int after_block_exec_trace_tb(CPUState *env, TranslationBlock *tb) {
 }
 bool init_plugin(void *self) {
 
-    printf("test\n");
     panda_arg_list *args = panda_get_args("terrace_tbb");
 
     const char *trace_file_name = panda_parse_string_opt(args, "trace_file",
