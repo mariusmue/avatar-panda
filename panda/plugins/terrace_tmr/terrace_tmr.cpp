@@ -16,6 +16,7 @@
 #include <fstream>
 #include <map>
 #include <vector>
+#include <algorithm>
 
 extern "C" {
 #include "qapi/qmp/qjson.h"
@@ -35,43 +36,70 @@ extern int errno;
 #define IS_SYMBOLIC 0x02
 #define IS_ROM 0x04
 
-typedef struct mem_range {
+
+namespace {
+
+struct mem_range_t {
+    mem_range_t(target_ulong a, uint32_t s, uint8_t f): addr(a), size(s), flags(f){}
     target_ulong addr;
     uint32_t size;
     uint8_t flags;
-} mem_range_t;
+};
 
-std::ofstream mem_dump_file;
-std::ofstream smem_trace_file;
+const char * nmem_file_name;
+const char * smem_file_name;
+
 std::map<target_ulong,uint8_t> readmap;
 std::map<target_ulong, std::vector<std::tuple<uint8_t, uint8_t>>> special_read_map;
 std::vector<mem_range_t> memory_ranges;
+
+}
+
+
+void write_memory_entry(std::ofstream& file, target_ulong addr,
+        std::vector<uint8_t> mem)
+{
+    uint32_t size;
+    size = (uint32_t)   mem.size() ;
+
+    file.write( (const char *) &addr, sizeof(target_ulong));
+    file.write( (const char *) &size, 4 );
+    file.write( (const char *) mem.data(), mem.size());
+}
+
 
 /* The data format written to file is address | length | content */
 void write_serialized_memory_map(void)
 {
     std::vector<uint8_t> mem;
-    target_ulong addr, marker = 0;
-    uint32_t size;
+    target_ulong marker = 0;
+
+    std::ofstream file;
+        
+    file.open(nmem_file_name, std::ios::out | std::ios::binary);
+    
+    if (!file) {
+        std::cerr << "Failed to open " << nmem_file_name << ":" << strerror(errno) << std::endl;
+        exit(1);
+    }
 
     for (auto const& e : readmap) {
-        if (e.first == marker+1){
+        if (mem.empty()){ // Deal with first iteration
+            mem.push_back(e.second);
+            marker = e.first;
+            continue;
         }
-        else if (!mem.empty()){ // mem.empty() only happens on first iter
-            addr = marker - mem.size() + 1;
-            size = (uint32_t)   mem.size() ;
-
-            mem_dump_file.write( (const char *) &addr, sizeof(target_ulong));
-            mem_dump_file.write( (const char *) &size, 4 );
-            for (auto const &b : mem) {
-                mem_dump_file.write( (const char*) &b, 1);
-            }
+        if (e.first == marker + mem.size() ){
+            mem.push_back(e.second);
+        }
+        else {
+            write_memory_entry( file, marker, mem);
             mem.clear();
+            marker = e.first;
+            mem.push_back(e.second);
         }
-
-        mem.push_back(e.second);
-        marker = e.first;
     }
+    write_memory_entry( file, marker, mem );
 }
 
 /*
@@ -82,21 +110,28 @@ void write_serialized_memory_map(void)
  */
 void write_serialized_special_memory_map(void)
 {
-    uint8_t val, flags;
-    uint32_t size;
-    target_ulong addr = 0;
+
+    std::ofstream file;
+    file.open(smem_file_name, std::ios::out | std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open " << smem_file_name << ":" << strerror(errno) << std::endl;
+        exit(1);
+    }
 
     for (auto const& e :  special_read_map) {
         assert(!e.second.empty());
-        addr = e.first;
-        size = (uint32_t) e.second.size() ;
+        target_ulong addr = e.first;
+        uint32_t size = (uint32_t) e.second.size() ;
 
-        smem_trace_file.write( (const char *) &addr, sizeof(target_ulong));
-        smem_trace_file.write( (const char *) &size, 4);
+        file.write( (const char *) &addr, sizeof(target_ulong));
+        file.write( (const char *) &size, 4);
         for (auto const &elem : e.second) {
+            uint8_t val, flags;
+
             std::tie (val, flags) = elem;
-            smem_trace_file.write( (const char*) &val, 1);
-            smem_trace_file.write( (const char*) &flags, 1);
+            file.write( (const char*) &val, 1);
+            file.write( (const char*) &flags, 1);
         }
     }
 }
@@ -109,30 +144,23 @@ void write_serialized_special_memory_map(void)
  */
 int mem_read_cb(CPUState *cpu, target_ulong pc, target_ulong addr, target_ulong size, void *buf)
 {
-    uint8_t val;
-    mem_range_t mem_range;
 
     for (int i=0; i<size; i++) {
-        val = ((uint8_t *) buf)[i];
-        mem_range = {0, 0, 0};
+        uint8_t val = ((uint8_t *) buf)[i];
+        target_ulong address = addr + i;
 
         // We need to resolve everytime for accesses accross boundaries
-        for (auto const &m : memory_ranges) {
-            if ( (m.addr <= addr + i) && (addr + i <= m.addr + m.size)) {
-                mem_range = m;
-                break;
-            }
-        }
-
+        auto mem_range = std::find_if(memory_ranges.begin(), memory_ranges.end(),
+                [address](mem_range_t m) {return ((m.addr <= address) && (address <= m.addr + m.size));});
         // Validate that we want to log this access
-        if (mem_range.size == 0 || mem_range.flags & IS_ROM) continue; 
+        if (mem_range == memory_ranges.end() || mem_range->flags & IS_ROM) continue; 
 
         // Log special accesses to our special map
-        if ( (mem_range.flags & IS_SPECIAL) || (mem_range.flags & IS_SYMBOLIC)) {
-            special_read_map[pc+i].push_back( std::make_tuple(val, mem_range.flags));
+        if ( (mem_range->flags & IS_SPECIAL) || (mem_range->flags & IS_SYMBOLIC)) {
+            special_read_map[address].emplace_back( val, mem_range->flags);
         } else { // Log normal accesses
-            if (readmap.count(pc+i)) continue; //did we already log this?
-            readmap[pc+i] = val;
+            if (readmap.count(address)) continue; //did we already log this?
+            readmap[address] = val;
         }
     }
     return 0;
@@ -187,7 +215,8 @@ void load_configuration(const char *config_file_name)
         if (qdict_haskey(mapping, "is_special") && qdict_get_bool(mapping, "is_special"))
             flags |= IS_SPECIAL;
 
-        memory_ranges.push_back( (mem_range_t) { address, size, flags} );
+        memory_ranges.emplace_back( address, size, flags );
+        printf("Adding range with flags: %x\n", flags);
 
     }
 
@@ -199,16 +228,13 @@ bool init_plugin(void *self)
 
     panda_arg_list *args = panda_get_args("terrace_tmr");
 
-    const char *nmem_file_name = panda_parse_string_opt(args, "memory_file",
+    nmem_file_name = panda_parse_string_opt(args, "memory_file",
             "dumped_mem.bin", "File to store memory reads for initialization");
-    const char *smem_file_name = panda_parse_string_opt(args, "special_memory_file",
+    smem_file_name = panda_parse_string_opt(args, "special_memory_file",
             "special_reads.bin", "File storing special memory read");
     const char *config_file_name = panda_parse_string_opt(args, "config_file",
             "conf.json", "JSON file configuring the memory ranges");
 
-    smem_trace_file.open(smem_file_name, std::ios::out | std::ios::binary);
-    mem_dump_file.open(nmem_file_name, std::ios::out | std::ios::binary);
- 
 
     load_configuration(config_file_name);
 
@@ -228,6 +254,4 @@ bool init_plugin(void *self)
 void uninit_plugin(void *self) {
     write_serialized_memory_map();
     write_serialized_special_memory_map();
-    mem_dump_file.close();
-    smem_trace_file.close();
 }
