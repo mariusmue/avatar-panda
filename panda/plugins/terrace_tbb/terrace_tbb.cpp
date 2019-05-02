@@ -3,7 +3,11 @@
 #include <errno.h>
 #include <string.h>
 
+#include <iostream>
+#include <fstream>
+
 #include "panda/plugin.h"
+#include "tbb.pb.h"
 
 
 extern "C" {
@@ -13,26 +17,21 @@ extern "C" {
 
 extern int errno;
 
+namespace {
+const char * trace_file_name;
+TBBBlocks blocks;
 
-static FILE * trace_file = NULL;
-static target_ulong last_pc = 0; 
-static int n = 0;
+target_ulong last_pc = 0; 
+unsigned int n = 0;
 
-typedef struct entry {
-    uint32_t n;
-    target_ulong pc;
-} entry_t;
+}
 
 void write_entry(void)
 {
-    entry_t e;
 
-    e.pc = last_pc;
-    e.n = n;
-    if ( fwrite( &e, sizeof(entry_t), 1, trace_file) != 1){
-        fprintf(stderr, "Couldn't write pc: %s\n", strerror(errno));
-        exit(-1);
-    }
+    TBBBlock *b = blocks.add_basic_blocks();
+    b->set_address(last_pc);
+    b->set_n(n);
     n = 1;
 }
 
@@ -54,14 +53,8 @@ bool init_plugin(void *self) {
 
     panda_arg_list *args = panda_get_args("terrace_tbb");
 
-    const char *trace_file_name = panda_parse_string_opt(args, "trace_file",
+    trace_file_name = panda_parse_string_opt(args, "trace_file",
             "basic_blocks.bin", "File to store traced BB addresses");
-
-    trace_file = fopen(trace_file_name, "w");
-    if(trace_file == NULL) {
-        fprintf(stderr, "Cannot open/create trace file: %s\n", strerror(errno));
-        return false;
-    }
 
     panda_cb pcb;
 
@@ -73,5 +66,15 @@ bool init_plugin(void *self) {
 
 void uninit_plugin(void *self) {
     write_entry();
-    fclose(trace_file);
+    
+    // write blocks to file
+    std::ofstream file;
+
+    file.open(trace_file_name, std::ios::out | std::ios::binary);
+
+    if (!file) {
+        std::cerr << "Failed to open " << trace_file_name << ":" << strerror(errno) << std::endl;
+        exit(1);
+    }
+    blocks.SerializeToOstream(&file);
 }

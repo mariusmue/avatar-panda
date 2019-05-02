@@ -5,6 +5,10 @@
 # jumps in the stack pointer
 #LIBS+=
 
+tbb.pb.cc tbb.pb.h: 
+	protoc --proto_path=$(PLUGIN_SRC_DIR) --cpp_out=. $(PLUGIN_SRC_DIR)/tbb.proto
+
+obj-y+=tbb.pb.o
 # The main rule for your plugin. List all object-file dependencies.
-$(PLUGIN_TARGET_DIR)/panda_$(PLUGIN_NAME).so: \
+$(PLUGIN_TARGET_DIR)/panda_$(PLUGIN_NAME).so: tbb.pb.o \
 	$(PLUGIN_OBJ_DIR)/$(PLUGIN_NAME).o
