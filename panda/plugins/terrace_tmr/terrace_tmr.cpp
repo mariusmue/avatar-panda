@@ -25,6 +25,8 @@ extern "C" {
     void uninit_plugin(void *);
 }
 
+#include "tmr.pb.h"
+
 extern int errno;
 
 /*  We need to store every byte for special memory, which can also be symbolic.
@@ -56,32 +58,21 @@ std::vector<mem_range_t> memory_ranges;
 }
 
 
-void write_memory_entry(std::ofstream& file, target_ulong addr,
-        std::vector<uint8_t> mem)
-{
-    uint32_t size;
-    size = (uint32_t)   mem.size() ;
-
-    file.write( (const char *) &addr, sizeof(target_ulong));
-    file.write( (const char *) &size, 4 );
-    file.write( (const char *) mem.data(), mem.size());
+void add_read(TMRNormalReads& reads, target_ulong addr, std::string mem) {
+    TMRNormalMemoryRead *read_entry = reads.add_reads();
+    read_entry->set_address(addr);
+    read_entry->set_content(mem) ;
 }
 
-
-/* The data format written to file is address | length | content */
+/* Writes a TMRNormalReads Message to disk (c.f. tmr.proto) */
 void write_serialized_memory_map(void)
 {
-    std::vector<uint8_t> mem;
+    TMRNormalReads reads;
+    std::string mem;
     target_ulong marker = 0;
 
     std::ofstream file;
         
-    file.open(nmem_file_name, std::ios::out | std::ios::binary);
-    
-    if (!file) {
-        std::cerr << "Failed to open " << nmem_file_name << ":" << strerror(errno) << std::endl;
-        exit(1);
-    }
 
     for (auto const& e : readmap) {
         if (mem.empty()){ // Deal with first iteration
@@ -93,25 +84,50 @@ void write_serialized_memory_map(void)
             mem.push_back(e.second);
         }
         else {
-            write_memory_entry( file, marker, mem);
+            add_read( reads, marker, mem);
             mem.clear();
             marker = e.first;
             mem.push_back(e.second);
         }
     }
-    write_memory_entry( file, marker, mem );
+    add_read( reads, marker, mem);
+
+    file.open(nmem_file_name, std::ios::out | std::ios::binary);
+    
+    if (!file) {
+        std::cerr << "Failed to open " << nmem_file_name << ":" << strerror(errno) << std::endl;
+        exit(1);
+    }
+    
+    reads.SerializeToOstream(&file);
+
 }
 
-/*
- * The format for the special map is a bit more complex. In essence, it's:
- * address | n_elements | elem_0 | elem_1 | ... | elem_n
- * whereas an element is in the form of
- * value | flags
- */
+/* Writes a TMRSpecialReads Message to disk (c.f. tmr.proto) */
 void write_serialized_special_memory_map(void)
 {
 
+    TMRSpecialReads reads;
     std::ofstream file;
+
+    for (auto const& e :  special_read_map) {
+        TMRSpecialMemoryRead *spec_read = reads.add_reads();
+
+        assert(!e.second.empty());
+
+        spec_read->set_address(e.first);
+        for (auto const &elem : e.second) {
+            uint8_t val, flags;
+            std::tie (val, flags) = elem;
+
+            TMRByte *b = spec_read->add_tmr_bytes();
+            b->set_value(val);
+            if (flags & IS_SYMBOLIC) b->set_is_symbolic(true);
+            if (flags & IS_SPECIAL) b->set_is_special(true);
+            if (flags & IS_ROM) b->set_is_rom(true);
+        }
+    }
+
     file.open(smem_file_name, std::ios::out | std::ios::binary);
 
     if (!file) {
@@ -119,21 +135,7 @@ void write_serialized_special_memory_map(void)
         exit(1);
     }
 
-    for (auto const& e :  special_read_map) {
-        assert(!e.second.empty());
-        target_ulong addr = e.first;
-        uint32_t size = (uint32_t) e.second.size() ;
-
-        file.write( (const char *) &addr, sizeof(target_ulong));
-        file.write( (const char *) &size, 4);
-        for (auto const &elem : e.second) {
-            uint8_t val, flags;
-
-            std::tie (val, flags) = elem;
-            file.write( (const char*) &val, 1);
-            file.write( (const char*) &flags, 1);
-        }
-    }
+    reads.SerializeToOstream(&file);
 }
 
 /*
