@@ -58,17 +58,18 @@ std::vector<mem_range_t> memory_ranges;
 }
 
 
-void add_read(TMRNormalReads& reads, target_ulong addr, std::string mem) {
+void add_read(TMRNormalReads& reads, target_ulong addr, std::vector<uint8_t> &mem) {
     TMRNormalMemoryRead *read_entry = reads.add_reads();
     read_entry->set_address(addr);
-    read_entry->set_content(mem) ;
+    read_entry->set_content(mem.data(), mem.size()) ;
 }
 
 /* Writes a TMRNormalReads Message to disk (c.f. tmr.proto) */
 void write_serialized_memory_map(void)
 {
     TMRNormalReads reads;
-    std::string mem;
+    //std::string mem;
+    std::vector<uint8_t> mem;
     target_ulong marker = 0;
 
     std::ofstream file;
