@@ -182,7 +182,6 @@ void load_configuration(const char *config_file_name)
     QListEntry *entry;
     target_ulong address;
     uint32_t size;
-    uint8_t flags = 0;
 
     std::ifstream ifs(config_file_name);
     std::string conf_json ((std::istreambuf_iterator<char>(ifs)),
@@ -191,7 +190,7 @@ void load_configuration(const char *config_file_name)
     obj = qobject_from_json(conf_json.c_str());
 
     if (!obj || qobject_type(obj) != QTYPE_QDICT) {
-        fprintf(stderr, "Error parsing JSON configuration file\n");
+        fprintf(stderr, "[TMR] Error parsing JSON configuration file\n");
         exit(1);
     }
 
@@ -202,6 +201,7 @@ void load_configuration(const char *config_file_name)
 
     QLIST_FOREACH_ENTRY(memories, entry)
     {
+        uint8_t flags = 0;
         mapping = qobject_to_qdict(entry->value);
         QDICT_ASSERT_KEY_TYPE(mapping, "size", QTYPE_QINT);
         QDICT_ASSERT_KEY_TYPE(mapping, "address", QTYPE_QINT);
