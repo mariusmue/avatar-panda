@@ -98,12 +98,9 @@ class TJITMemoryManager;
 struct TCGLLVMContextPrivate {
     LLVMContext& m_context;
     IRBuilder<> m_builder;
-    /* Added code to dump subset of module for klee */
 
     /* Current m_module */
     Module *m_module;
-    /* Added code to dump subset of module for klee */
-    //Module *klee_module;
 
     /* JIT engine */
     TJITMemoryManager *m_jitMemoryManager;
@@ -122,8 +119,6 @@ struct TCGLLVMContextPrivate {
 
     /* Function for current translation block */
     Function *m_tbFunction;
-    /* Added code to dump subset of module for klee */
-    //Function *klee_tbFunction;
 
     /* Current temp m_values */
     Value* m_values[TCG_MAX_TEMPS];
@@ -328,9 +323,6 @@ TCGLLVMContextPrivate::TCGLLVMContextPrivate()
     initMemoryHelpers();
 
     m_module = new Module("tcg-llvm", m_context);
-    /* code to dump subset of llvm code for klee */ 
-    //klee_module = new Module("klee_module", m_context);
-    //klee_builder = new IRBuilder(m_context);
 
     m_jitMemoryManager = new TJITMemoryManager();
 
@@ -1489,20 +1481,19 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
 
 
     /* pointer to CPUArchStateType */
-    llvm::Type *pCPUArchStateType = PointerType::getUnqual(m_CPUArchStateType);
+    llvm::Type *pCPUArchStateType =
+        PointerType::getUnqual(m_CPUArchStateType);
 
     /****************************************************************************/
     /* Added code to dump subset of llvm code for klee (goal: dump a module suitable for klee) */ 
     /****************************************************************************/
 
-    /* static FunctionType* get(Type *result, ArrayRef<Type *> params, bool isVarArg) */
-    FunctionType *tbFunctionType = FunctionType::get(wordType(), std::vector<llvm::Type*>{pCPUArchStateType}, false);
-
-    /* static Function* Create(FunctionType *Ty, LinkageTypes Linkage, const Twine &N="", Module *M=nullptr) */
-    m_tbFunction = Function::Create(tbFunctionType, Function::PrivateLinkage, fName.str(), m_module);
-
-    /* static BasicBlock* Create(LLVMContext &Context, const Twine &Name="", Function *Parent=nullptr, BasicBlock *InsertBefore=nullptr) */
-    BasicBlock *basicBlock = BasicBlock::Create(m_context, "entry", m_tbFunction);
+    FunctionType *tbFunctionType = FunctionType::get(wordType(),
+            std::vector<llvm::Type*>{pCPUArchStateType}, false);
+    m_tbFunction = Function::Create(tbFunctionType,
+            Function::PrivateLinkage, fName.str(), m_module);
+    BasicBlock *basicBlock = BasicBlock::Create(m_context,
+            "entry", m_tbFunction);
 
     /* specify that all the instructions will be inserted before basicBlock */
     m_builder.SetInsertPoint(basicBlock);
@@ -1531,14 +1522,13 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     //Value *LastPCPtr = m_builder.CreateIntToPtr(LastPCPtrInt, intPtrType(64), "lastpc");
 
     /* Setup rr_guest_instr_count stores */
-    Constant *InstrCountPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->rr_guest_instr_count);
-    Value *InstrCountPtr = m_builder.CreateIntToPtr(InstrCountPtrInt, intPtrType(64), "rrgicp");
+    Constant *InstrCountPtrInt = constInt(sizeof(uintptr_t) * 8,
+            (uintptr_t)&first_cpu->rr_guest_instr_count);
+    Value *InstrCountPtr = m_builder.CreateIntToPtr(
+            InstrCountPtrInt, intPtrType(64), "rrgicp");
     Instruction *InstrCount = m_builder.CreateLoad(InstrCountPtr, true, "rrgic");
     InstrCount->setMetadata("host", RRUpdateMD);
     Value *One64 = constInt(64, 1);
-
-    //Value *klee_next_pc = m_builder.CreateAlloca(intType(64), 0, "klee_next_pc");
-    //Value *klee_next_pc_ptr = m_builder.CreateIntToPtr(klee_next_pc, intPtrType(64), "klee_next_pc_ptr");
 
     /* Generate code for each opc */
     const TCGArg *args;
@@ -1570,8 +1560,6 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
             //Constant *PC = ConstantInt::get(intType(64), args[0]);
             //Instruction *LastPCSt = m_builder.CreateStore(PC, LastPCPtr, true);
             //Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
-            //Instruction *NextPC = m_builder.CreateStore(PC, klee_next_pc_ptr, true);
-
             // TRL 2014 hack to annotate that last instruction as the one
             // that sets PC
             //LastPCSt->setMetadata("host", PCUpdateMD);
@@ -1579,30 +1567,21 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
             //GuestPCSt->setMetadata("targetAsm", targetAsmMD);
             //NextPC->setMetadata("targetAsm", targetAsmMD);
 
-
-            InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(InstrCount, One64, "rrgic"));
+            InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(
+                        InstrCount, One64, "rrgic"));
 
             assert(InstrCount);
-
             Instruction *RRSt = m_builder.CreateStore(InstrCount, InstrCountPtr, true);
-
             InstrCount->setMetadata("host", RRUpdateMD);
-
             RRSt->setMetadata("host", RRUpdateMD);
         }
 
         args += generateOperation(opc, op, args);
     }
 
-
-
-
-
     /* Finalize function */
-    if(!isa<ReturnInst>(m_tbFunction->back().back())){
+    if(!isa<ReturnInst>(m_tbFunction->back().back()))
         m_builder.CreateRet(ConstantInt::get(wordType(), 0));
-        //klee_builder.CreateRet(ConstantInt::get(wordType(), 0));
-    }
 
     /* Clean up unused m_values */
     for(int i=0; i<TCG_MAX_TEMPS; ++i)
