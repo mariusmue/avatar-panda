@@ -453,6 +453,7 @@ extern bool exit_request;
 
 extern int generate_llvm;
 extern int execute_llvm;
+extern char *terrace_llvm_file;
 extern const int has_llvm_engine;
 
 #endif

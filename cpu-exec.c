@@ -44,6 +44,7 @@ const int has_llvm_engine = 1;
 
 int generate_llvm = 0;
 int execute_llvm = 0;
+char *terrace_llvm_file = NULL;
 extern bool panda_tb_chaining;
 
 extern bool panda_exit_loop;
