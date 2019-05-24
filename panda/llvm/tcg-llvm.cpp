@@ -1456,25 +1456,30 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     */
 
     if (m_CPUArchStateType == nullptr) {
-        // XXX: instead of adding all the helper functions I just extract the
-        // definition of the struct CPUARMState from llvm-helpers.bc
-        //init_llvm_helpers();
 
-        //================== code taken from helper_runtime.cpp - begin
-        // Read helper module, link into JIT, verify
-        char *exe = strdup(qemu_file);
-        //errs() << "qemu_file: " << qemu_file << "\n";
-        std::string bitcode(dirname(exe));
-        free(exe);
-        bitcode.append("/llvm-helpers.bc");
+        if (!terrace_llvm_file){
+            init_llvm_helpers();
+        } else {		
+            // XXX: instead of adding all the helper functions I just extract the
+            // definition of the struct CPUARMState from llvm-helpers.bc
+            //init_llvm_helpers();
 
-        SMDiagnostic Err;
-        llvm::Module *helpermod = ParseIRFile(bitcode, Err, m_context);
-        if (!helpermod) {
-            Err.print("qemu", llvm::errs());
-            exit(1);
+            //================== code taken from helper_runtime.cpp - begin
+            // Read helper module, link into JIT, verify
+            char *exe = strdup(qemu_file);
+            //errs() << "qemu_file: " << qemu_file << "\n";
+            std::string bitcode(dirname(exe));
+            free(exe);
+            bitcode.append("/llvm-helpers.bc");
+
+            SMDiagnostic Err;
+            llvm::Module *helpermod = ParseIRFile(bitcode, Err, m_context);
+            if (!helpermod) {
+                Err.print("qemu", llvm::errs());
+                exit(1);
+            }
+            //================== code taken from helper_runtime.cpp - end
         }
-        //================== code taken from helper_runtime.cpp - end
         m_CPUArchStateType = m_module->getTypeByName(m_CPUArchStateName);
     }
     assert(m_CPUArchStateType);
@@ -1503,8 +1508,13 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     /* Prepare globals and temps information */
     initGlobalsAndLocalTemps();
 
+    /* MM: Declaring PCUpdateMD and Guest/LastPCPtr already here in case terrace_llvm is not used */
+    MDNode *PCUpdateMD = NULL;
+    Value *GuestPCPtr = NULL;
+    Value *LastPCPtr = NULL;
+
     LLVMContext &C = m_context;
-    //MDNode *PCUpdateMD = MDNode::get(C, MDString::get(C, "pcupdate"));
+    if (!terrace_llvm_file) PCUpdateMD = MDNode::get(C, MDString::get(C, "pcupdate"));
     MDNode *RRUpdateMD = MDNode::get(C, MDString::get(C, "rrupdate"));
     MDNode *RuntimeMD = MDNode::get(C, MDString::get(C, "runtime"));
 
@@ -1515,12 +1525,14 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     Instruction *EnvI2PI = dyn_cast<Instruction>(m_envInt);
     if (EnvI2PI) EnvI2PI->setMetadata("host", RuntimeMD);
 
+    if (!terrace_llvm_file) {
     /* Setup panda_guest_pc and last_pc stores */
-    //Constant *GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->panda_guest_pc);
-    //Value *GuestPCPtr = m_builder.CreateIntToPtr(GuestPCPtrInt, intPtrType(64), "guestpc");
-    //Constant *LastPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&tcg_llvm_runtime.last_pc);
-    //Value *LastPCPtr = m_builder.CreateIntToPtr(LastPCPtrInt, intPtrType(64), "lastpc");
-
+        Constant *GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->panda_guest_pc);
+        GuestPCPtr = m_builder.CreateIntToPtr(GuestPCPtrInt, intPtrType(64), "guestpc");
+        Constant *LastPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&tcg_llvm_runtime.last_pc);
+        LastPCPtr = m_builder.CreateIntToPtr(LastPCPtrInt, intPtrType(64), "lastpc");
+    }
+    
     /* Setup rr_guest_instr_count stores */
     Constant *InstrCountPtrInt = constInt(sizeof(uintptr_t) * 8,
             (uintptr_t)&first_cpu->rr_guest_instr_count);
@@ -1554,18 +1566,20 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
 
             //std::cout << ss.str() << "\n";
             //printf("\n");
-            //MDNode *targetAsmMD = MDNode::get(C, MDString::get(C, codebuf));
+            if (!terrace_llvm_file) {
+                MDNode *targetAsmMD = MDNode::get(C, MDString::get(C, codebuf));
 
-            // volatile store of current PC
-            //Constant *PC = ConstantInt::get(intType(64), args[0]);
-            //Instruction *LastPCSt = m_builder.CreateStore(PC, LastPCPtr, true);
-            //Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
-            // TRL 2014 hack to annotate that last instruction as the one
-            // that sets PC
-            //LastPCSt->setMetadata("host", PCUpdateMD);
-            //GuestPCSt->setMetadata("host", PCUpdateMD);
-            //GuestPCSt->setMetadata("targetAsm", targetAsmMD);
-            //NextPC->setMetadata("targetAsm", targetAsmMD);
+                // volatile store of current PC
+                Constant *PC = ConstantInt::get(intType(64), args[0]);
+                Instruction *LastPCSt = m_builder.CreateStore(PC, LastPCPtr, true);
+                Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
+                // TRL 2014 hack to annotate that last instruction as the one
+                // that sets PC
+                LastPCSt->setMetadata("host", PCUpdateMD);
+                GuestPCSt->setMetadata("host", PCUpdateMD);
+                GuestPCSt->setMetadata("targetAsm", targetAsmMD);
+                //NextPC->setMetadata("targetAsm", targetAsmMD);
+            }
 
             InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(
                         InstrCount, One64, "rrgic"));
@@ -1629,11 +1643,12 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
         qemu_log("%s", s.str().c_str());
         qemu_log("\n");
         qemu_log_flush();
-
+    }
+    if(terrace_llvm_file) {
         // added code to dump llvm bitcode
         //static int dumped = 0;
         //if (dumped == 0){
-            int fd = open("dumped_bitcode.bc", O_CREAT | O_WRONLY | O_TRUNC, 0666);
+            int fd = open(terrace_llvm_file, O_CREAT | O_WRONLY | O_TRUNC, 0666);
             llvm::raw_fd_ostream OS(fd, true);
             WriteBitcodeToFile(m_module, OS);
             OS.flush();
