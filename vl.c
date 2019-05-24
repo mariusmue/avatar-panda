@@ -162,6 +162,7 @@ struct TCGLLVMContext;
 extern struct TCGLLVMContext* tcg_llvm_ctx;
 extern int generate_llvm;
 extern int execute_llvm;
+extern char *terrace_llvm_file;
 extern const int has_llvm_engine;
 
 struct TCGLLVMContext* tcg_llvm_initialize(void);
@@ -4133,6 +4134,15 @@ int main(int argc, char **argv, char **envp)
                     exit(1);
                 }
                 generate_llvm = 1;
+                break;
+            case QEMU_OPTION_terrace_llvm:
+                if (!has_llvm_engine) {
+                    fprintf(stderr, "Cannot execute un LLVM mode (S2E mode present or LLVM mode missing)\n");
+                    exit(1);
+                }
+                execute_llvm = 1;
+                generate_llvm = 1;
+                terrace_llvm_file = strdup(optarg);
                 break;
 #endif
             case QEMU_OPTION_replay:

@@ -59,6 +59,7 @@ int llvmtrace_flags = 0;
 
 int generate_llvm = 0;
 int execute_llvm = 0;
+char *terrace_llvm_file = NULL;
 extern bool panda_tb_chaining;
 
 /* -icount align implementation. */
