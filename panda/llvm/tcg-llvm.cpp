@@ -1520,7 +1520,6 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     /* MM: Declaring PCUpdateMD and Guest/LastPCPtr already here in case terrace_llvm is not used */
     MDNode *PCUpdateMD = NULL;
     Value *GuestPCPtr = NULL;
-    Value *LastPCPtr = NULL;
 
     LLVMContext &C = m_context;
     if (!terrace_llvm_file) PCUpdateMD = MDNode::get(C, MDString::get(C, "pcupdate"));
@@ -1536,8 +1535,6 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     /* Setup panda_guest_pc and last_pc stores */
         Constant *GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->panda_guest_pc);
         GuestPCPtr = m_builder.CreateIntToPtr(GuestPCPtrInt, intPtrType(64), "guestpc");
-        Constant *LastPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&tcg_llvm_runtime.last_pc);
-        LastPCPtr = m_builder.CreateIntToPtr(LastPCPtrInt, intPtrType(64), "lastpc");
     }
     
     /* Setup rr_guest_instr_count stores */
@@ -1559,37 +1556,14 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
         int opc = op->opc;
 
         if (opc == INDEX_op_insn_start) {
-<<<<<<< HEAD
-            // volatile store of current PC
-            Constant *PC = ConstantInt::get(intType(64), args[0]);
-            Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
-=======
-            //Get the guest assembly corresponding to this TCG instruction
-            
-            //std::stringstream ss;
-            char codebuf[op->num_target_bytes];
-            for (int j = 0; j < op->num_target_bytes; j++){
-                //printf("%02x", s->target_codebuf[op->target_codebuf_idx + j]);
-                sprintf(&codebuf[j*2], "%02x", s->target_codebuf[op->target_codebuf_idx + j]);
-                //ss << s->target_codebuf[op->target_codebuf_idx + j];
-            }
-            //printf("%s\n", codebuf);
-
-            //std::cout << ss.str() << "\n";
-            //printf("\n");
             if (!terrace_llvm_file) {
-                MDNode *targetAsmMD = MDNode::get(C, MDString::get(C, codebuf));
 
                 // volatile store of current PC
                 Constant *PC = ConstantInt::get(intType(64), args[0]);
-                Instruction *LastPCSt = m_builder.CreateStore(PC, LastPCPtr, true);
                 Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
                 // TRL 2014 hack to annotate that last instruction as the one
                 // that sets PC
-                LastPCSt->setMetadata("host", PCUpdateMD);
                 GuestPCSt->setMetadata("host", PCUpdateMD);
-                GuestPCSt->setMetadata("targetAsm", targetAsmMD);
-                //NextPC->setMetadata("targetAsm", targetAsmMD);
             }
 
             InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(
