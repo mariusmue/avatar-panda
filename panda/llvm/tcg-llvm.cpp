@@ -63,6 +63,14 @@
 #include "panda/tcg-llvm.h"
 #include "panda/helper_runtime.h"
 
+// added for klee
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Support/SourceMgr.h"
+extern "C" {
+#include <libgen.h>                                                                                                                                                                                                 
+}
+
+
 #if defined(CONFIG_SOFTMMU)
 
 // To support other architectures, make similar minor changes to op_helper.c
@@ -1435,6 +1443,9 @@ int TCGLLVMContextPrivate::generateOperation(int opc, const TCGOp *op,
     return nb_args;
 }
 
+// resolved full path to the current executable
+extern const char *qemu_file;
+
 void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
 {
     /* Create new function for current translation block */
@@ -1454,19 +1465,51 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     */
 
     if (m_CPUArchStateType == nullptr) {
-        init_llvm_helpers();
+
+        if (!terrace_llvm_file){
+            init_llvm_helpers();
+        } else {		
+            // XXX: instead of adding all the helper functions I just extract the
+            // definition of the struct CPUARMState from llvm-helpers.bc
+            //init_llvm_helpers();
+
+            //================== code taken from helper_runtime.cpp - begin
+            // Read helper module, link into JIT, verify
+            char *exe = strdup(qemu_file);
+            //errs() << "qemu_file: " << qemu_file << "\n";
+            std::string bitcode(dirname(exe));
+            free(exe);
+            bitcode.append("/llvm-helpers.bc");
+
+            SMDiagnostic Err;
+            llvm::Module *helpermod = ParseIRFile(bitcode, Err, m_context);
+            if (!helpermod) {
+                Err.print("qemu", llvm::errs());
+                exit(1);
+            }
+            //================== code taken from helper_runtime.cpp - end
+        }
         m_CPUArchStateType = m_module->getTypeByName(m_CPUArchStateName);
     }
     assert(m_CPUArchStateType);
 
+
+    /* pointer to CPUArchStateType */
     llvm::Type *pCPUArchStateType =
         PointerType::getUnqual(m_CPUArchStateType);
+
+    /****************************************************************************/
+    /* Added code to dump subset of llvm code for klee (goal: dump a module suitable for klee) */ 
+    /****************************************************************************/
+
     FunctionType *tbFunctionType = FunctionType::get(wordType(),
             std::vector<llvm::Type*>{pCPUArchStateType}, false);
     m_tbFunction = Function::Create(tbFunctionType,
             Function::PrivateLinkage, fName.str(), m_module);
     BasicBlock *basicBlock = BasicBlock::Create(m_context,
             "entry", m_tbFunction);
+
+    /* specify that all the instructions will be inserted before basicBlock */
     m_builder.SetInsertPoint(basicBlock);
 
     m_tcgContext = s;
@@ -1474,8 +1517,12 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     /* Prepare globals and temps information */
     initGlobalsAndLocalTemps();
 
+    /* MM: Declaring PCUpdateMD and Guest/LastPCPtr already here in case terrace_llvm is not used */
+    MDNode *PCUpdateMD = NULL;
+    Value *GuestPCPtr = NULL;
+
     LLVMContext &C = m_context;
-    MDNode *PCUpdateMD = MDNode::get(C, MDString::get(C, "pcupdate"));
+    if (!terrace_llvm_file) PCUpdateMD = MDNode::get(C, MDString::get(C, "pcupdate"));
     MDNode *RRUpdateMD = MDNode::get(C, MDString::get(C, "rrupdate"));
     MDNode *RuntimeMD = MDNode::get(C, MDString::get(C, "runtime"));
 
@@ -1484,11 +1531,12 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
     Instruction *EnvI2PI = dyn_cast<Instruction>(m_envInt);
     if (EnvI2PI) EnvI2PI->setMetadata("host", RuntimeMD);
 
-    /* Setup panda_guest_pc */
-    Constant *GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8,
-            (uintptr_t)&first_cpu->panda_guest_pc);
-    Value *GuestPCPtr = m_builder.CreateIntToPtr(GuestPCPtrInt, intPtrType(64), "guestpc");
-
+    if (!terrace_llvm_file) {
+    /* Setup panda_guest_pc and last_pc stores */
+        Constant *GuestPCPtrInt = constInt(sizeof(uintptr_t) * 8, (uintptr_t)&first_cpu->panda_guest_pc);
+        GuestPCPtr = m_builder.CreateIntToPtr(GuestPCPtrInt, intPtrType(64), "guestpc");
+    }
+    
     /* Setup rr_guest_instr_count stores */
     Constant *InstrCountPtrInt = constInt(sizeof(uintptr_t) * 8,
             (uintptr_t)&first_cpu->rr_guest_instr_count);
@@ -1508,15 +1556,19 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
         int opc = op->opc;
 
         if (opc == INDEX_op_insn_start) {
-            // volatile store of current PC
-            Constant *PC = ConstantInt::get(intType(64), args[0]);
-            Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
-            // TRL 2014 hack to annotate that last instruction as the one
-            // that sets PC
-            GuestPCSt->setMetadata("host", PCUpdateMD);
+            if (!terrace_llvm_file) {
 
-            InstrCount = dyn_cast<Instruction>(
-                    m_builder.CreateAdd(InstrCount, One64, "rrgic"));
+                // volatile store of current PC
+                Constant *PC = ConstantInt::get(intType(64), args[0]);
+                Instruction *GuestPCSt = m_builder.CreateStore(PC, GuestPCPtr, true);
+                // TRL 2014 hack to annotate that last instruction as the one
+                // that sets PC
+                GuestPCSt->setMetadata("host", PCUpdateMD);
+            }
+
+            InstrCount = dyn_cast<Instruction>(m_builder.CreateAdd(
+                        InstrCount, One64, "rrgic"));
+
             assert(InstrCount);
             Instruction *RRSt = m_builder.CreateStore(InstrCount, InstrCountPtr, true);
             InstrCount->setMetadata("host", RRUpdateMD);
@@ -1577,6 +1629,33 @@ void TCGLLVMContextPrivate::generateCode(TCGContext *s, TranslationBlock *tb)
         qemu_log("\n");
         qemu_log_flush();
     }
+    if(terrace_llvm_file) {
+        // added code to dump llvm bitcode
+        //static int dumped = 0;
+        //if (dumped == 0){
+            int fd = open(terrace_llvm_file, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+            llvm::raw_fd_ostream OS(fd, true);
+            WriteBitcodeToFile(m_module, OS);
+            OS.flush();
+        //}
+        //dumped = 1;
+    }
+    /*
+    if(qemu_loglevel_mask(CPU_LOG_LLVM_IR)) {
+        std::string fcnString;
+        llvm::raw_string_ostream s(fcnString);
+        s << *klee_tbFunction;
+        qemu_log("OUT (LLVM IR):\n");
+        qemu_log("%s", s.str().c_str());
+        qemu_log("\n");
+        qemu_log_flush();
+
+        int fd = open("klee_bitcode.bc", O_CREAT | O_WRONLY | O_TRUNC, 0666);
+        llvm::raw_fd_ostream OS(fd, true);
+        WriteBitcodeToFile(klee_module, OS);
+        OS.flush();
+    }
+    */
 }
 
 /***********************************/
@@ -1697,4 +1776,3 @@ void tcg_llvm_write_module(TCGLLVMContext *l, const char *path)
 {
     l->writeModule(path);
 }
-

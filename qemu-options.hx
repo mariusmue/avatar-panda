@@ -4124,6 +4124,9 @@ DEF("llvm", 0, QEMU_OPTION_execute_llvm,
     "-llvm           execute code using LLVM JIT\n", QEMU_ARCH_ALL)
 DEF("generate-llvm", 0, QEMU_OPTION_generate_llvm,
     "-generate-llvm  translate code into LLVM but don't execute it\n", QEMU_ARCH_ALL)
+DEF("terrace-llvm", HAS_ARG, QEMU_OPTION_terrace_llvm,
+    "-terrace-llvm  <filename>\n"
+    "                generate llvm code for terrace and store it to <filename>\n", QEMU_ARCH_ALL)
 #endif
 
 DEF("record-from", HAS_ARG, QEMU_OPTION_record_from,
