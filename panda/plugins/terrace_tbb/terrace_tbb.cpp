@@ -26,7 +26,6 @@ unsigned int n = 0;
 
 target_ulong asid;
 target_ulong start_addr;
-target_ulong end_addr;
 
 }
 
@@ -41,19 +40,29 @@ void write_entry(void) {
 
 int after_block_exec_trace_tb(CPUState *env, TranslationBlock *tb) {
 
-    if( !asid || panda_current_asid(env) == asid ) {
-        if( !end_addr || ((tb->pc) < end_addr && (tb->pc) >= start_addr) ) {
-            target_ulong pc = tb->pc;
+    // Don't bother logging memory read if performed by process we're not interested in. 
+    // Nor if we only want to BBs within a specific memory range.
+    if(! (!asid || panda_current_asid(env) == asid) ) return 0;
 
-            if ( (pc != last_pc || n == UINT_MAX ) && n > 0) {
-                write_entry();
-            }
-            else {
-                n++;
-            }
-            last_pc = pc;
-        }
+    target_ulong pc = tb->pc;
+
+    // If the trace begins at a specified breakpoint start_addr,
+    // then we can set the ASID for later filtering
+    if( start_addr && (pc == start_addr) ) {
+        asid = panda_current_asid(env);
     }
+
+    printf("%" PRIu64 "    ", rr_get_guest_instr_count());
+    printf(TARGET_FMT_lx "    ", panda_current_asid(env));
+    printf(TARGET_FMT_lx "\n", tb->pc);
+
+    if ( (pc != last_pc || n == UINT_MAX ) && n > 0) {
+        write_entry();
+    }
+    else {
+        n++;
+    }
+    last_pc = pc;
     return 0;
 }
 
@@ -65,11 +74,7 @@ bool init_plugin(void *self) {
             "basic_blocks.bin", "File to store traced BB addresses");
     asid = panda_parse_ulong_opt(args, "asid", 0, 
             "The address space ID for the target process");
-
-    start_addr = panda_parse_ulong_opt(args, "start_addr", 0, "base address of target binary");
-    uint32_t size_dec = panda_parse_uint32_opt(args, "bin_size", 0, "address space size (decimal)");
-    
-    if( size_dec ) end_addr = start_addr + size_dec;
+    start_addr = panda_parse_ulong_opt(args, "start_addr", 0, "known start/breakpoint address in record");
  
     panda_cb pcb;
 
