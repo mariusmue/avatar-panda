@@ -52,9 +52,9 @@ int after_block_exec_trace_tb(CPUState *env, TranslationBlock *tb) {
         asid = panda_current_asid(env);
     }
 
-    printf("%" PRIu64 "    ", rr_get_guest_instr_count());
-    printf(TARGET_FMT_lx "    ", panda_current_asid(env));
-    printf(TARGET_FMT_lx "\n", tb->pc);
+    //printf("%" PRIu64 "    ", rr_get_guest_instr_count());
+    //printf(TARGET_FMT_lx "    ", panda_current_asid(env));
+    //printf(TARGET_FMT_lx "\n", tb->pc);
 
     if ( (pc != last_pc || n == UINT_MAX ) && n > 0) {
         write_entry();
