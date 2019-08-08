@@ -17,6 +17,7 @@
 #include <map>
 #include <vector>
 #include <algorithm>
+#include <sstream>
 
 extern "C" {
 #include "qapi/qmp/qjson.h"
@@ -54,7 +55,7 @@ const char * smem_file_name;
 std::map<target_ulong,uint8_t> readmap;
 std::map<target_ulong, std::vector<std::tuple<uint8_t, uint8_t>>> special_read_map;
 std::vector<mem_range_t> memory_ranges;
-
+std::ofstream log_file;
 }
 
 
@@ -148,6 +149,9 @@ void write_serialized_special_memory_map(void)
 int mem_read_cb(CPUState *cpu, target_ulong pc, target_ulong addr, target_ulong size, void *buf)
 {
 
+    // Nasty hack, but for testing, the ARM binary will use two fixed ASIDs
+    if( !(panda_current_asid(cpu) == 0x72a2db0 || panda_current_asid(cpu) == 0x72a0000)) return 0;
+
     for (int i=0; i<size; i++) {
         uint8_t val = ((uint8_t *) buf)[i];
         target_ulong address = addr + i;
@@ -157,6 +161,9 @@ int mem_read_cb(CPUState *cpu, target_ulong pc, target_ulong addr, target_ulong 
                 [address](mem_range_t m) {return ((m.addr <= address) && (address <= m.addr + m.size));});
         // Validate that we want to log this access
         if (mem_range == memory_ranges.end() || mem_range->flags & IS_ROM) continue; 
+
+        if (i == 0)
+            log_file << std::hex << pc << "    " << addr << std::endl;
 
         // Log special accesses to our special map
         if ( (mem_range->flags & IS_SPECIAL) || (mem_range->flags & IS_SYMBOLIC)) {
@@ -238,9 +245,9 @@ bool init_plugin(void *self)
     const char *config_file_name = panda_parse_string_opt(args, "config_file",
             "conf.json", "JSON file configuring the memory ranges");
 
-
     load_configuration(config_file_name);
 
+    log_file.open("mem_callbacks_logged", std::ios::out);
 
 
     panda_enable_memcb();
@@ -257,4 +264,6 @@ bool init_plugin(void *self)
 void uninit_plugin(void *self) {
     write_serialized_memory_map();
     write_serialized_special_memory_map();
+
+    log_file.close();
 }

@@ -1,5 +1,9 @@
 syntax = "proto2";
 
+message TMRSyscall {
+    repeated TMRNormalReads reads = 1;
+}
+
 message TMRNormalReads {
     repeated TMRNormalMemoryRead reads = 1;
 }
@@ -11,21 +15,16 @@ message TMRSpecialReads {
 message TMRNormalMemoryRead {
     required uint64 address = 1;
     required bytes content = 2;
-
 }
-
 
 message TMRSpecialMemoryRead {
     required uint64 address =1;
     repeated TMRByte tmr_bytes = 2;
 }
 
-
 message TMRByte {
     required int32 value = 1;
     optional bool is_rom=2;
     optional bool is_symbolic=3;
     optional bool is_special=4;
-
-
 }
