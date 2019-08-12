@@ -150,7 +150,7 @@ int mem_read_cb(CPUState *cpu, target_ulong pc, target_ulong addr, target_ulong 
 {
 
     // Nasty hack, but for testing, the ARM binary will use two fixed ASIDs
-    if( !(panda_current_asid(cpu) == 0x72a2db0 || panda_current_asid(cpu) == 0x72a0000)) return 0;
+    if( !(panda_current_asid(cpu) == 0x72a2db0 || panda_current_asid(cpu) == 0x72a0000 || panda_current_asid(cpu) == 0x72a3ffc )) return 0;
 
     for (int i=0; i<size; i++) {
         uint8_t val = ((uint8_t *) buf)[i];

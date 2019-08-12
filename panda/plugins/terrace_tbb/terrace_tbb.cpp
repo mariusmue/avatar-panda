@@ -57,12 +57,11 @@ int before_block_exec_trace_tb(CPUState *env, TranslationBlock *tb) {
     //if(!asid || panda_current_asid(env) != asid) return 0;
 
     // Nasty hack, but for testing, the ARM binary will use two fixed ASIDs
-    if( !(panda_current_asid(env) == 0x72a2db0 || panda_current_asid(env) == 0x72a0000)) return 0;
+    if( !(panda_current_asid(env) == 0x72a2db0 || panda_current_asid(env) == 0x72a0000 || panda_current_asid(env) == 0x72a3ffc )) return 0;
 
     if ( (pc != last_pc || n == UINT_MAX ) && n > 0) {
         if(log_file.is_open())
             log_file << std::hex << last_pc << "    " << panda_current_asid(env) << "    " << std::dec << n << std::endl;
-
         write_entry();
     }
     else {
