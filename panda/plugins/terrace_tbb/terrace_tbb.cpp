@@ -48,17 +48,20 @@ int before_block_exec_trace_tb(CPUState *env, TranslationBlock *tb) {
 
     // If the trace begins at a specified breakpoint start_addr,
     // then we can set the ASID for later filtering
-    if( start_addr != 0 && pc == start_addr ) {
-        asid = panda_current_asid(env);
-    }
+    // This only works when one ASID is used (e.g. in x86)
+    //if( start_addr != 0 && pc == start_addr ) {
+     //   asid = panda_current_asid(env);
+    //}
 
     // Don't bother logging memory read if performed by process we're not interested in. 
     // Nor if we only want to BBs within a specific memory range.
     //if(!asid || panda_current_asid(env) != asid) return 0;
 
     // Nasty hack, but for testing, the ARM binary will use two fixed ASIDs
-    if( !(panda_current_asid(env) == 0x72a2db0 || panda_current_asid(env) == 0x72a0000 || panda_current_asid(env) == 0x72a3ffc )) return 0;
-
+    if( !(panda_current_asid(env) == 0x72a2db0 || panda_current_asid(env) == 0x72a0000)) return 0;
+   // ASID for vector/vyscalls instructions = 0x72a3ffc ))
+   //
+   //
     if ( (pc != last_pc || n == UINT_MAX ) && n > 0) {
         if(log_file.is_open())
             log_file << std::hex << last_pc << "    " << panda_current_asid(env) << "    " << std::dec << n << std::endl;

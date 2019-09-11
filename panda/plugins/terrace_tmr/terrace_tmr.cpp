@@ -56,6 +56,7 @@ std::map<target_ulong,uint8_t> readmap;
 std::map<target_ulong, std::vector<std::tuple<uint8_t, uint8_t>>> special_read_map;
 std::vector<mem_range_t> memory_ranges;
 std::ofstream log_file;
+target_ulong asid;
 }
 
 
@@ -149,8 +150,13 @@ void write_serialized_special_memory_map(void)
 int mem_read_cb(CPUState *cpu, target_ulong pc, target_ulong addr, target_ulong size, void *buf)
 {
 
+    // Don't bother logging memory read if performed by process we're not interested in. 
+    // Nor if we only want to BBs within a specific memory range.
+    //if(asid && panda_current_asid(cpu) != asid) return 0;
+
     // Nasty hack, but for testing, the ARM binary will use two fixed ASIDs
-    if( !(panda_current_asid(cpu) == 0x72a2db0 || panda_current_asid(cpu) == 0x72a0000 || panda_current_asid(cpu) == 0x72a3ffc )) return 0;
+    if( !(panda_current_asid(cpu) == 0x72a2db0 || panda_current_asid(cpu) == 0x72a0000)) return 0;
+   // ASID for vector/vyscalls instructions = 0x72a3ffc ))
 
     for (int i=0; i<size; i++) {
         uint8_t val = ((uint8_t *) buf)[i];
@@ -244,6 +250,8 @@ bool init_plugin(void *self)
             "special_reads.bin", "File storing special memory read");
     const char *config_file_name = panda_parse_string_opt(args, "config_file",
             "conf.json", "JSON file configuring the memory ranges");
+    asid = panda_parse_ulong_opt(args, "asid", 0, "known asid");
+
 
     load_configuration(config_file_name);
 
